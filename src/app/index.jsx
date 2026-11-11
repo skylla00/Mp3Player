@@ -150,9 +150,9 @@ function createStyles(colors) {
     webShell: { width: "100%", maxWidth: 760, alignSelf: "center" },
     headerContainer: { overflow: "hidden" },
     header: {
-      minHeight: 34,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
+      minHeight: 51,
+      paddingHorizontal: 15,
+      paddingVertical: 9,
       backgroundColor: colors.header,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.border,
@@ -160,16 +160,16 @@ function createStyles(colors) {
       alignItems: "center",
       justifyContent: "space-between",
     },
-    brand: { flexDirection: "row", alignItems: "center", gap: 6 },
+    brand: { flexDirection: "row", alignItems: "center", gap: 9 },
     brandMark: {
-      width: 21,
-      height: 21,
-      borderRadius: 7,
+      width: 32,
+      height: 32,
+      borderRadius: 11,
       backgroundColor: colors.accent,
       alignItems: "center",
       justifyContent: "center",
     },
-    brandTitle: { color: colors.text, fontSize: 10, fontWeight: "700" },
+    brandTitle: { color: colors.text, fontSize: 15, fontWeight: "700" },
     headerButton: {
       width: 42,
       height: 42,
@@ -1479,7 +1479,7 @@ export default function App() {
           <View style={styles.header}>
             <View style={styles.brand}>
               <View style={styles.brandMark}>
-                <Ionicons name="musical-notes" size={11} color="#fff" />
+                <Ionicons name="musical-notes" size={17} color="#fff" />
               </View>
               <Text style={styles.brandTitle}>Mp3Player</Text>
             </View>
@@ -1489,7 +1489,7 @@ export default function App() {
               style={styles.headerButton}
               hitSlop={0}
             >
-              <Ionicons name="settings-outline" size={11} color={colors.text} />
+              <Ionicons name="settings-outline" size={17} color={colors.text} />
             </Pressable>
           </View>
         </View>
