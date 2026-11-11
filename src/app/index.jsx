@@ -19,15 +19,25 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
 import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
 import * as FileSystem from "expo-file-system/legacy";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
+  Easing,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
   withTiming,
 } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { scheduleOnRN } from "react-native-worklets";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+// Intervalo (ms) entre as atualizações de status do player. Também é usado
+// para suavizar o avanço da barra de progresso entre uma atualização e outra.
+const PLAYER_UPDATE_INTERVAL_MS = 500;
+
+// Passo (ms) usado pelos leitores de tela para avançar/voltar na barra de progresso.
+const ACCESSIBILITY_SEEK_STEP_MS = 10000;
 
 const STORAGE_KEY = "player-de-musica-native";
 
@@ -150,9 +160,9 @@ function createStyles(colors) {
     webShell: { width: "100%", maxWidth: 760, alignSelf: "center" },
     headerContainer: { overflow: "hidden" },
     header: {
-      minHeight: 51,
-      paddingHorizontal: 15,
-      paddingVertical: 9,
+      minHeight: 34,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
       backgroundColor: colors.header,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.border,
@@ -160,16 +170,16 @@ function createStyles(colors) {
       alignItems: "center",
       justifyContent: "space-between",
     },
-    brand: { flexDirection: "row", alignItems: "center", gap: 9 },
+    brand: { flexDirection: "row", alignItems: "center", gap: 6 },
     brandMark: {
-      width: 32,
-      height: 32,
-      borderRadius: 11,
+      width: 21,
+      height: 21,
+      borderRadius: 7,
       backgroundColor: colors.accent,
       alignItems: "center",
       justifyContent: "center",
     },
-    brandTitle: { color: colors.text, fontSize: 15, fontWeight: "700" },
+    brandTitle: { color: colors.text, fontSize: 10, fontWeight: "700" },
     headerButton: {
       width: 42,
       height: 42,
@@ -339,9 +349,11 @@ function createStyles(colors) {
       justifyContent: "center",
     },
     disabledPlayButton: { opacity: 0.55 },
+    // Área de toque maior que a trilha visual (5 px); as margens negativas
+    // mantêm o layout com a mesma altura de antes.
     progressTouchArea: {
-      height: 28,
-      marginVertical: -11.5,
+      height: 32,
+      marginVertical: -13.5,
       justifyContent: "center",
       position: "relative",
     },
@@ -360,7 +372,7 @@ function createStyles(colors) {
     progressThumb: {
       position: "absolute",
       left: 0,
-      top: 8,
+      top: 10,
       width: 12,
       height: 12,
       borderRadius: 6,
@@ -794,90 +806,176 @@ const PlaylistLibrary = React.memo(function PlaylistLibrary({
   );
 });
 
+// Barra de progresso controlada por gestos nativos (react-native-gesture-handler).
+// Os callbacks dos gestos rodam na thread de UI: a bolinha acompanha o dedo sem
+// passar pelo JS a cada movimento. O JS só é acionado uma vez, ao soltar, para
+// chamar o seekTo do player.
 const ProgressSlider = React.memo(function ProgressSlider({
   progress,
   durationMillis,
+  isPlaying,
   onSeek,
   styles,
 }) {
-  const widthRef = useRef(0);
-  const isDraggingRef = useRef(false);
-  const dragStartXRef = useRef(0);
-  const dragStartProgressRef = useRef(0);
-  const dragProgressRef = useRef(0);
   const sliderWidth = useSharedValue(0);
   const animatedProgress = useSharedValue(
     Math.min(Math.max(progress, 0), 1),
   );
+  // Verdadeiro enquanto o usuário está com o dedo na barra.
+  const isDragging = useSharedValue(false);
+  // Evita buscar duas vezes no mesmo toque e reverter uma busca já feita.
+  const didCommit = useSharedValue(false);
+  // Últimos valores vindos do player, lidos pelos callbacks que rodam no JS.
+  const latestRef = useRef({ progress, durationMillis });
+  const canSeek = durationMillis > 0;
+
   const fillStyle = useAnimatedStyle(() => ({
-    width: animatedProgress.value * sliderWidth.value,
+    // A trilha tem overflow hidden: deslocar o preenchimento (largura total)
+    // para a esquerda dá o mesmo visual de animar a largura, sem recalcular layout.
+    transform: [
+      { translateX: (animatedProgress.get() - 1) * sliderWidth.get() },
+    ],
   }));
   const thumbStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: animatedProgress.value * sliderWidth.value - 6 }],
+    transform: [
+      { translateX: animatedProgress.get() * sliderWidth.get() - 6 },
+    ],
   }));
 
+  const commitSeek = useCallback(
+    (ratio) => {
+      onSeek(ratio, latestRef.current.durationMillis);
+    },
+    [onSeek],
+  );
+
+  // Volta a barra para a posição real da música (toque cancelado pelo sistema).
+  const syncToPlayback = useCallback(() => {
+    if (didCommit.get()) return;
+    animatedProgress.set(Math.min(Math.max(latestRef.current.progress, 0), 1));
+  }, [animatedProgress, didCommit]);
+
+  const gesture = useMemo(() => {
+    const moveTo = (x) => {
+      "worklet";
+      const width = sliderWidth.get();
+      if (width > 0) {
+        animatedProgress.set(Math.min(Math.max(x / width, 0), 1));
+      }
+    };
+    const commit = () => {
+      "worklet";
+      if (didCommit.get()) return;
+      didCommit.set(true);
+      scheduleOnRN(commitSeek, animatedProgress.get());
+    };
+
+    const pan = Gesture.Pan()
+      .enabled(canSeek)
+      .minDistance(4)
+      .onBegin((event) => {
+        isDragging.set(true);
+        didCommit.set(false);
+        moveTo(event.x);
+      })
+      .onUpdate((event) => {
+        moveTo(event.x);
+      })
+      .onEnd(() => {
+        commit();
+      })
+      .onFinalize(() => {
+        isDragging.set(false);
+        if (!didCommit.get()) scheduleOnRN(syncToPlayback);
+      });
+
+    // Toque simples em qualquer ponto da barra pula para aquele ponto.
+    const tap = Gesture.Tap()
+      .enabled(canSeek)
+      .maxDuration(10000)
+      .onEnd((event) => {
+        moveTo(event.x);
+        commit();
+      });
+
+    return Gesture.Race(pan, tap);
+  }, [
+    animatedProgress,
+    canSeek,
+    commitSeek,
+    didCommit,
+    isDragging,
+    sliderWidth,
+    syncToPlayback,
+  ]);
+
   useEffect(() => {
-    if (!isDraggingRef.current) {
-      animatedProgress.set(Math.min(Math.max(progress, 0), 1));
+    latestRef.current = { progress, durationMillis };
+  }, [progress, durationMillis]);
+
+  // Ações dos leitores de tela (TalkBack): avançar ou voltar um passo fixo.
+  const adjustBy = useCallback(
+    (deltaMillis) => {
+      const { progress: current, durationMillis: total } = latestRef.current;
+      if (!total) return;
+      const ratio = Math.min(Math.max(current + deltaMillis / total, 0), 1);
+      animatedProgress.set(ratio);
+      onSeek(ratio, total);
+    },
+    [animatedProgress, onSeek],
+  );
+
+  // Valor falado em passos de 5 s, para o leitor de tela não repetir a cada atualização.
+  const spokenPosition = Math.floor((progress * durationMillis) / 5000) * 5000;
+
+  useEffect(() => {
+    if (isDragging.get()) return;
+    const next = Math.min(Math.max(progress, 0), 1);
+    const delta = next - animatedProgress.get();
+    if (isPlaying && delta > 0 && delta < 0.15) {
+      // Avanço normal da música: desliza até a nova posição em vez de dar saltos.
+      animatedProgress.set(
+        withTiming(next, {
+          duration: PLAYER_UPDATE_INTERVAL_MS,
+          easing: Easing.linear,
+        }),
+      );
+    } else {
+      animatedProgress.set(next);
     }
-  }, [animatedProgress, progress]);
+  }, [animatedProgress, isDragging, isPlaying, progress]);
 
   return (
-    <View
-      accessibilityLabel="Avançar ou retroceder na música"
-      onLayout={(event) => {
-        const width = event.nativeEvent.layout.width;
-        widthRef.current = width;
-        sliderWidth.set(width);
-      }}
-      onStartShouldSetResponder={(event) => {
-        if (!durationMillis || !widthRef.current) return false;
-        return (
-          Math.abs(
-            event.nativeEvent.locationX -
-              Math.min(Math.max(progress, 0), 1) * widthRef.current,
-          ) <= 18
-        );
-      }}
-      onResponderGrant={(event) => {
-        const currentProgress = Math.min(Math.max(progress, 0), 1);
-        isDraggingRef.current = true;
-        dragStartXRef.current = event.nativeEvent.locationX;
-        dragStartProgressRef.current = currentProgress;
-        dragProgressRef.current = currentProgress;
-        animatedProgress.set(currentProgress);
-      }}
-      onResponderMove={(event) => {
-        if (!widthRef.current) return;
-        const nextProgress = Math.min(
-          Math.max(
-            dragStartProgressRef.current +
-              (event.nativeEvent.locationX - dragStartXRef.current) /
-                widthRef.current,
-            0,
-          ),
-          1,
-        );
-        dragProgressRef.current = nextProgress;
-        animatedProgress.set(nextProgress);
-      }}
-      onResponderRelease={() => {
-        const nextProgress = dragProgressRef.current;
-        isDraggingRef.current = false;
-        onSeek(nextProgress, durationMillis);
-      }}
-      onResponderTerminate={() => {
-        isDraggingRef.current = false;
-        animatedProgress.set(Math.min(Math.max(progress, 0), 1));
-      }}
-      onResponderTerminationRequest={() => false}
-      style={styles.progressTouchArea}
-    >
-      <View style={styles.progressTrack}>
-        <Animated.View style={[styles.progressFill, fillStyle]} />
+    <GestureDetector gesture={gesture}>
+      <View
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel="Avançar ou retroceder na música"
+        accessibilityValue={{
+          text: canSeek
+            ? `${formatTime(spokenPosition)} de ${formatTime(durationMillis)}`
+            : "Nenhuma música tocando",
+        }}
+        accessibilityActions={[
+          { name: "increment", label: "Avançar 10 segundos" },
+          { name: "decrement", label: "Voltar 10 segundos" },
+        ]}
+        onAccessibilityAction={(event) => {
+          const action = event.nativeEvent.actionName;
+          if (action === "increment") adjustBy(ACCESSIBILITY_SEEK_STEP_MS);
+          if (action === "decrement") adjustBy(-ACCESSIBILITY_SEEK_STEP_MS);
+        }}
+        onLayout={(event) => {
+          sliderWidth.set(event.nativeEvent.layout.width);
+        }}
+        style={styles.progressTouchArea}
+      >
+        <View style={styles.progressTrack}>
+          <Animated.View style={[styles.progressFill, fillStyle]} />
+        </View>
+        <Animated.View style={[styles.progressThumb, thumbStyle]} />
       </View>
-      <Animated.View style={[styles.progressThumb, thumbStyle]} />
-    </View>
+    </GestureDetector>
   );
 });
 
@@ -1071,7 +1169,10 @@ export default function App() {
         } else {
           player = createAudioPlayer(
             { uri: song.uri },
-            { updateInterval: 500, volume: volumeRef.current },
+            {
+              updateInterval: PLAYER_UPDATE_INTERVAL_MS,
+              volume: volumeRef.current,
+            },
           );
           soundRef.current = player;
           playbackStatusSubscriptionRef.current = player.addListener(
@@ -1479,7 +1580,7 @@ export default function App() {
           <View style={styles.header}>
             <View style={styles.brand}>
               <View style={styles.brandMark}>
-                <Ionicons name="musical-notes" size={17} color="#fff" />
+                <Ionicons name="musical-notes" size={11} color="#fff" />
               </View>
               <Text style={styles.brandTitle}>Mp3Player</Text>
             </View>
@@ -1489,7 +1590,7 @@ export default function App() {
               style={styles.headerButton}
               hitSlop={0}
             >
-              <Ionicons name="settings-outline" size={17} color={colors.text} />
+              <Ionicons name="settings-outline" size={11} color={colors.text} />
             </Pressable>
           </View>
         </View>
@@ -1568,6 +1669,7 @@ export default function App() {
           </View>
           <ProgressSlider
             durationMillis={playback.durationMillis}
+            isPlaying={playback.isPlaying}
             onSeek={seekToProgress}
             progress={progress}
             styles={styles}
