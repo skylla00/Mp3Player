@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Alert,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   NativeEventEmitter,
   NativeModules,
@@ -29,6 +30,8 @@ import Animated, {
 } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { scheduleOnRN } from "react-native-worklets";
+import SongPickerSheet from "@/components/song-picker-sheet";
+import { DEVICE_SCAN_SUPPORTED, useDeviceMp3s } from "@/hooks/use-device-mp3s";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -94,6 +97,14 @@ const MP3_MIME_TYPES = new Set([
   "audio/mpeg3",
   "audio/x-mpeg-3",
 ]);
+
+// Músicas importadas pelo seletor de arquivos são cópias guardadas dentro do app.
+// Músicas encontradas no aparelho apontam para o arquivo original e nunca
+// devem ser apagadas por nós.
+function isAppOwnedFile(uri) {
+  const directory = FileSystem.documentDirectory;
+  return Boolean(directory) && typeof uri === "string" && uri.startsWith(directory);
+}
 
 function isValidId(value) {
   return (
@@ -992,6 +1003,7 @@ export default function App() {
     durationMillis: 0,
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [nameDialog, setNameDialog] = useState(null);
   const [nameInput, setNameInput] = useState("");
   const [status, setStatus] = useState("");
@@ -1012,6 +1024,22 @@ export default function App() {
   const customPlaylist = useMemo(
     () => playlists.find((playlist) => playlist.id === activePlaylistId) || null,
     [playlists, activePlaylistId],
+  );
+
+  // Lista de MP3 do aparelho, carregada em segundo plano e só exibida na janela
+  // de "Adicionar música".
+  const deviceMp3s = useDeviceMp3s();
+  const scanDeviceMp3s = deviceMp3s.scan;
+
+  // Ids que já estão no destino da adição (playlist aberta ou biblioteca).
+  const pickerAddedIds = useMemo(
+    () =>
+      new Set(
+        customPlaylist
+          ? (customPlaylist.songIds || []).map(String)
+          : songs.map((song) => String(song.id)),
+      ),
+    [customPlaylist, songs],
   );
 
   const playlistSongs = useMemo(() => {
@@ -1128,6 +1156,12 @@ export default function App() {
       }
     };
   }, []);
+
+  // Varredura silenciosa ao abrir o app: só roda se a permissão já foi concedida
+  // e não mostra nada na tela.
+  useEffect(() => {
+    if (isReady) scanDeviceMp3s();
+  }, [isReady, scanDeviceMp3s]);
 
   useEffect(() => {
     if (!isReady) return;
@@ -1369,7 +1403,9 @@ export default function App() {
     ]);
   }, [activePlaylistId]);
 
-  const importSongs = useCallback(async () => {
+  // Alternativa para plataformas sem varredura do aparelho (iOS e web): abre o
+  // seletor de arquivos do sistema e copia os MP3 escolhidos para dentro do app.
+  const importSongsFromFiles = useCallback(async () => {
     const copiedUris = [];
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -1442,6 +1478,72 @@ export default function App() {
     }
   }, [customPlaylist]);
 
+  // Clique em "Adicionar músicas": abre a janela com os MP3 encontrados no
+  // aparelho (pedindo a permissão na primeira vez e atualizando a lista).
+  const openSongPicker = useCallback(() => {
+    if (!DEVICE_SCAN_SUPPORTED) {
+      importSongsFromFiles();
+      return;
+    }
+    setStatus("");
+    setPickerOpen(true);
+    scanDeviceMp3s({ requestPermission: true });
+  }, [importSongsFromFiles, scanDeviceMp3s]);
+
+  const closeSongPicker = useCallback(() => setPickerOpen(false), []);
+
+  const requestDeviceAccess = useCallback(() => {
+    scanDeviceMp3s({ requestPermission: true });
+  }, [scanDeviceMp3s]);
+
+  const openAppSettings = useCallback(() => {
+    Linking.openSettings().catch((error) => {
+      setStatus(`Não foi possível abrir as configurações: ${error.message}`);
+    });
+  }, []);
+
+  // Botão "Adicionar" da janela: as músicas marcadas entram na biblioteca e,
+  // se houver uma playlist aberta, também nela.
+  const addDeviceSongs = useCallback(
+    (chosen) => {
+      if (!chosen.length) return;
+      const now = Date.now();
+      const chosenIds = chosen.map((song) => song.id);
+      setSongs((previous) => {
+        const knownIds = new Set(previous.map((song) => String(song.id)));
+        const fresh = chosen
+          .filter((song) => !knownIds.has(song.id))
+          .map((song) => ({
+            id: song.id,
+            name: song.name,
+            displayName: song.displayName,
+            uri: song.uri,
+            addedAt: now,
+          }));
+        return fresh.length ? [...previous, ...fresh] : previous;
+      });
+      if (customPlaylist) {
+        setPlaylists((previous) =>
+          previous.map((playlist) =>
+            playlist.id === customPlaylist.id
+              ? {
+                  ...playlist,
+                  songIds: [
+                    ...new Set([...(playlist.songIds || []), ...chosenIds]),
+                  ],
+                }
+              : playlist,
+          ),
+        );
+      }
+      setPickerOpen(false);
+      setStatus(
+        `${chosen.length} ${chosen.length === 1 ? "música adicionada" : "músicas adicionadas"}${customPlaylist ? " à playlist." : " à biblioteca."}`,
+      );
+    },
+    [customPlaylist],
+  );
+
   const removeSong = useCallback((song) => {
     if (customPlaylist) {
       Alert.alert(
@@ -1474,7 +1576,7 @@ export default function App() {
     }
     Alert.alert(
       "Remover música",
-      `Deseja remover "${song.displayName || song.name}" da biblioteca?`,
+      `Deseja remover "${song.displayName || song.name}" da biblioteca?${isAppOwnedFile(song.uri) ? "" : " O arquivo continuará no seu aparelho."}`,
       [
         { text: "Cancelar", style: "cancel" },
         {
@@ -1502,7 +1604,10 @@ export default function App() {
                   player.remove();
                 }
               }
-              await FileSystem.deleteAsync(song.uri, { idempotent: true });
+              // Só apaga cópias criadas pelo app; o MP3 original do aparelho fica intacto.
+              if (isAppOwnedFile(song.uri)) {
+                await FileSystem.deleteAsync(song.uri, { idempotent: true });
+              }
             } catch (error) {
               setStatus(`Não foi possível remover o arquivo da música: ${error.message}`);
               return;
@@ -1608,7 +1713,7 @@ export default function App() {
           onBack={onBackToPlaylists}
           onOpenPlaylist={openPlaylist}
           onCreatePlaylist={createPlaylist}
-          onImportSongs={importSongs}
+          onImportSongs={openSongPicker}
           onPlaySong={playSong}
           onTogglePlayback={togglePlayback}
           onRenameSong={renameSong}
@@ -1680,6 +1785,19 @@ export default function App() {
           </View>
         </View>
       </View>
+
+      <SongPickerSheet
+        visible={pickerOpen}
+        onClose={closeSongPicker}
+        colors={colors}
+        scan={deviceMp3s}
+        addedIds={pickerAddedIds}
+        addedLabel={customPlaylist ? "Já está na playlist" : "Já está na biblioteca"}
+        targetLabel={customPlaylist ? customPlaylist.name : "Biblioteca"}
+        onConfirm={addDeviceSongs}
+        onRequestAccess={requestDeviceAccess}
+        onOpenSettings={openAppSettings}
+      />
 
       <Modal
         animationType="fade"
