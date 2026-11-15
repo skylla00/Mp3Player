@@ -139,3 +139,112 @@ new file mode 100644
 +    listener?.invoke(direction)
 +  }
 +}
+--- a/node_modules/expo-audio/ios/AudioModule.swift
++++ b/node_modules/expo-audio/ios/AudioModule.swift
+@@ -17,12 +17,16 @@
+ 
+   public func definition() -> ModuleDefinition {
+     Name("ExpoAudio")
++    Events("onAudioControl")
+ 
+     OnCreate {
+       #if os(iOS)
+       self.appContext?.permissions?.register([
+         AudioRecordingRequester()
+       ])
++      MediaController.shared.onAudioControl = { [weak self] direction in
++        self?.sendEvent("onAudioControl", ["direction": direction])
++      }
+       #endif
+ 
+       setupInterruptionHandling()
+@@ -90,6 +94,9 @@
+     }
+ 
+     OnDestroy {
++      #if os(iOS)
++      MediaController.shared.onAudioControl = nil
++      #endif
+       registry.removeAllPreloadedPlayers()
+       registry.removeAll()
+       NotificationCenter.default.removeObserver(self)
+--- a/node_modules/expo-audio/ios/MediaController.swift
++++ b/node_modules/expo-audio/ios/MediaController.swift
+@@ -5,9 +5,13 @@
+ class MediaController {
+   static let shared = MediaController()
+ 
++  var onAudioControl: ((String) -> Void)?
++
+   private var activePlayer: AudioPlayer?
+   private var remoteCommandCenter = MPRemoteCommandCenter.shared()
+   private var nowPlayingInfoCenter = MPNowPlayingInfoCenter.default()
++  private var nextTrackCommandTarget: Any?
++  private var previousTrackCommandTarget: Any?
+ 
+   private var currentArtworkUrl: URL?
+   private var cachedArtwork: MPMediaItemArtwork?
+@@ -250,6 +254,30 @@
+       return .success
+     }
+ 
++    if let nextTrackCommandTarget {
++      remoteCommandCenter.nextTrackCommand.removeTarget(nextTrackCommandTarget)
++    }
++    nextTrackCommandTarget = remoteCommandCenter.nextTrackCommand.addTarget { [weak self] _ in
++      guard let self, self.activePlayer != nil else {
++        return .commandFailed
++      }
++
++      self.onAudioControl?("next")
++      return .success
++    }
++
++    if let previousTrackCommandTarget {
++      remoteCommandCenter.previousTrackCommand.removeTarget(previousTrackCommandTarget)
++    }
++    previousTrackCommandTarget = remoteCommandCenter.previousTrackCommand.addTarget { [weak self] _ in
++      guard let self, self.activePlayer != nil else {
++        return .commandFailed
++      }
++
++      self.onAudioControl?("previous")
++      return .success
++    }
++
+     remoteCommandCenter.togglePlayPauseCommand.addTarget { [weak self] _ in
+       guard let player = self?.activePlayer else {
+         return .commandFailed
+@@ -305,6 +333,8 @@
+ 
+     remoteCommandCenter.playCommand.isEnabled = true
+     remoteCommandCenter.pauseCommand.isEnabled = true
++    remoteCommandCenter.nextTrackCommand.isEnabled = true
++    remoteCommandCenter.previousTrackCommand.isEnabled = true
+     remoteCommandCenter.togglePlayPauseCommand.isEnabled = true
+     remoteCommandCenter.changePlaybackPositionCommand.isEnabled = !isLiveStream
+     remoteCommandCenter.skipForwardCommand.isEnabled = options?.showSeekForward ?? false
+@@ -314,6 +344,8 @@
+   private func disableRemoteCommands() {
+     remoteCommandCenter.playCommand.isEnabled = false
+     remoteCommandCenter.pauseCommand.isEnabled = false
++    remoteCommandCenter.nextTrackCommand.isEnabled = false
++    remoteCommandCenter.previousTrackCommand.isEnabled = false
+     remoteCommandCenter.togglePlayPauseCommand.isEnabled = false
+     remoteCommandCenter.changePlaybackPositionCommand.isEnabled = false
+     remoteCommandCenter.skipForwardCommand.isEnabled = false
+@@ -322,6 +354,14 @@
+     // Remove event targets
+     remoteCommandCenter.playCommand.removeTarget(self)
+     remoteCommandCenter.pauseCommand.removeTarget(self)
++    if let nextTrackCommandTarget {
++      remoteCommandCenter.nextTrackCommand.removeTarget(nextTrackCommandTarget)
++      self.nextTrackCommandTarget = nil
++    }
++    if let previousTrackCommandTarget {
++      remoteCommandCenter.previousTrackCommand.removeTarget(previousTrackCommandTarget)
++      self.previousTrackCommandTarget = nil
++    }
+     remoteCommandCenter.togglePlayPauseCommand.removeTarget(self)
+     remoteCommandCenter.changePlaybackPositionCommand.removeTarget(self)
+     remoteCommandCenter.skipForwardCommand.removeTarget(self)
