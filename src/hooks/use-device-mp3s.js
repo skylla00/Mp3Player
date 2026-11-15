@@ -9,6 +9,9 @@ import * as MediaLibrary from "expo-media-library/legacy";
 export const DEVICE_SCAN_SUPPORTED = Platform.OS === "android";
 
 const PAGE_SIZE = 500;
+// Ignora arquivos curtos (toques, notificações, efeitos sonoros). Arquivos cuja
+// duração o Android ainda não informou (0) são mantidos para não esconder músicas.
+const MIN_DURATION_SECONDS = 30;
 const MP3_FILE = /\.mp3$/i;
 // Só precisamos ler áudio (Android 13+ pede permissão por tipo de mídia).
 const AUDIO_PERMISSION = ["audio"];
@@ -108,7 +111,9 @@ export function useDeviceMp3s() {
           after,
         });
         for (const asset of page.assets) {
-          if (asset.uri && MP3_FILE.test(asset.filename || "")) {
+          const isTooShort =
+            asset.duration > 0 && asset.duration < MIN_DURATION_SECONDS;
+          if (asset.uri && MP3_FILE.test(asset.filename || "") && !isTooShort) {
             found.push(toSong(asset));
           }
         }
