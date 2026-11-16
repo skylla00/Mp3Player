@@ -22,9 +22,13 @@ import { createAudioPlayer, setAudioModeAsync } from "expo-audio";
 import * as FileSystem from "expo-file-system/legacy";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
+  cancelAnimation,
   Easing,
   useAnimatedStyle,
   useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
   withSpring,
   withTiming,
 } from "react-native-reanimated";
@@ -162,6 +166,90 @@ function formatTime(milliseconds = 0) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function PlayerTitle({ title, styles }) {
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const [contentWidth, setContentWidth] = useState(0);
+  const offset = useSharedValue(0);
+  const marqueeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: offset.value }],
+  }));
+  const overflow = Math.max(contentWidth - viewportWidth, 0);
+
+  useEffect(() => {
+    cancelAnimation(offset);
+    offset.set(0);
+
+    if (overflow <= 1) return undefined;
+
+    offset.set(
+      withRepeat(
+        withSequence(
+          withDelay(
+            900,
+            withTiming(-overflow, {
+              duration: Math.max(1800, overflow * 30),
+              easing: Easing.linear,
+            }),
+          ),
+          withDelay(1200, withTiming(0, { duration: 0 })),
+        ),
+        -1,
+        false,
+      ),
+    );
+
+    return () => cancelAnimation(offset);
+  }, [offset, overflow, title]);
+
+  return (
+    <View
+      style={styles.playerTitleViewport}
+      onLayout={(event) => setViewportWidth(event.nativeEvent.layout.width)}
+    >
+      <Animated.View
+        onLayout={(event) => setContentWidth(event.nativeEvent.layout.width)}
+        style={[styles.playerTitleTrack, marqueeStyle]}
+      >
+        <Text numberOfLines={1} style={[styles.nowPlayingName, styles.playerTitleText]}>
+          {title}
+        </Text>
+      </Animated.View>
+    </View>
+  );
+}
+
+function PlayerControlButton({
+  accessibilityLabel,
+  children,
+  disabled,
+  onPress,
+  style,
+}) {
+  const scale = useSharedValue(1);
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+  const handlePressIn = useCallback(() => {
+    scale.set(withSpring(0.94, { damping: 18, stiffness: 380 }));
+  }, [scale]);
+  const handlePressOut = useCallback(() => {
+    scale.set(withSpring(1, { damping: 16, stiffness: 300 }));
+  }, [scale]);
+
+  return (
+    <AnimatedPressable
+      accessibilityLabel={accessibilityLabel}
+      disabled={disabled}
+      onPress={onPress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      style={[style, animatedStyle]}
+    >
+      {children}
+    </AnimatedPressable>
+  );
 }
 
 function createStyles(colors) {
@@ -328,28 +416,53 @@ function createStyles(colors) {
     playerBar: {
       borderTopWidth: 1,
       borderTopColor: colors.border,
-      backgroundColor: colors.header,
-      paddingHorizontal: 16,
-      paddingTop: 12,
-      paddingBottom: Platform.OS === "ios" ? 5 : 10,
-      gap: 10,
+      backgroundColor: colors.surface,
+      paddingHorizontal: 18,
+      paddingTop: 14,
+      paddingBottom: Platform.OS === "ios" ? 7 : 10,
+      gap: 11,
     },
-    playerTrack: { flexDirection: "row", alignItems: "center", gap: 10 },
+    playerTrack: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+    },
     miniArtwork: {
-      width: 40,
-      height: 40,
-      borderRadius: 13,
+      width: 44,
+      height: 44,
+      borderRadius: 14,
       backgroundColor: colors.surfaceRaised,
       alignItems: "center",
       justifyContent: "center",
+      borderWidth: 1,
+      borderColor: colors.border,
     },
-    nowPlayingLabel: { color: colors.muted, fontSize: 10, marginBottom: 2 },
-    nowPlayingName: { color: colors.text, fontSize: 13, fontWeight: "600" },
+    nowPlayingLabel: {
+      color: colors.muted,
+      fontSize: 9,
+      fontWeight: "700",
+      letterSpacing: 0.9,
+      marginBottom: 2,
+    },
+    nowPlayingName: { color: colors.text, fontSize: 14, fontWeight: "700" },
+    playerTitleViewport: { flex: 1, minWidth: 0, overflow: "hidden" },
+    playerTitleTrack: { alignSelf: "flex-start", flexDirection: "row", flexShrink: 0 },
+    playerTitleText: { flexShrink: 0 },
     playerControls: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
-      gap: 24,
+      gap: 16,
+    },
+    skipButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceRaised,
+      alignItems: "center",
+      justifyContent: "center",
     },
     playButton: {
       width: 46,
@@ -358,6 +471,11 @@ function createStyles(colors) {
       backgroundColor: colors.accentStrong,
       alignItems: "center",
       justifyContent: "center",
+      shadowColor: colors.accentStrong,
+      shadowOffset: { width: 0, height: 3 },
+      shadowOpacity: 0.24,
+      shadowRadius: 7,
+      elevation: 3,
     },
     disabledPlayButton: { opacity: 0.55 },
     // Área de toque maior que a trilha visual (5 px); as margens negativas
@@ -369,9 +487,9 @@ function createStyles(colors) {
       position: "relative",
     },
     progressTrack: {
-      height: 5,
+      height: 4,
       borderRadius: 4,
-      backgroundColor: colors.surfaceRaised,
+      backgroundColor: colors.border,
       overflow: "hidden",
     },
     progressFill: {
@@ -396,7 +514,7 @@ function createStyles(colors) {
       justifyContent: "space-between",
       marginTop: 5,
     },
-    timeText: { color: colors.muted, fontSize: 10 },
+    timeText: { color: colors.muted, fontSize: 11 },
     modalBackdrop: {
       flex: 1,
       backgroundColor: "rgba(0,0,0,0.62)",
@@ -1731,23 +1849,23 @@ export default function App() {
             </View>
             <View style={styles.cardText}>
               <Text style={styles.nowPlayingLabel}>TOCANDO AGORA</Text>
-              <Text numberOfLines={1} style={styles.nowPlayingName}>{currentTitle}</Text>
+              <PlayerTitle title={currentTitle} styles={styles} />
             </View>
           </View>
           <View style={styles.playerControls}>
-            <Pressable
+            <PlayerControlButton
               accessibilityLabel="Música anterior"
               disabled={!currentSong}
               onPress={() => skipSong(-1)}
-              hitSlop={8}
+              style={styles.skipButton}
             >
               <Ionicons
                 name="play-skip-back"
-                size={21}
+                size={19}
                 color={currentSong ? colors.text : colors.muted}
               />
-            </Pressable>
-            <Pressable
+            </PlayerControlButton>
+            <PlayerControlButton
               accessibilityLabel={playback.isPlaying ? "Pausar música" : "Reproduzir música"}
               disabled={!currentSong}
               onPress={togglePlayback}
@@ -1758,19 +1876,19 @@ export default function App() {
                 size={23}
                 color="#272039"
               />
-            </Pressable>
-            <Pressable
+            </PlayerControlButton>
+            <PlayerControlButton
               accessibilityLabel="Próxima música"
               disabled={!currentSong}
               onPress={() => skipSong(1)}
-              hitSlop={8}
+              style={styles.skipButton}
             >
               <Ionicons
                 name="play-skip-forward"
-                size={21}
+                size={19}
                 color={currentSong ? colors.text : colors.muted}
               />
-            </Pressable>
+            </PlayerControlButton>
           </View>
           <ProgressSlider
             durationMillis={playback.durationMillis}
