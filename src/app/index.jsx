@@ -8,6 +8,7 @@ import {
   NativeModules,
   Platform,
   Pressable,
+  ScrollView,
   StatusBar,
   StyleSheet,
   Switch,
@@ -24,7 +25,11 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   cancelAnimation,
   Easing,
+  Extrapolation,
+  interpolate,
   useAnimatedStyle,
+  ZoomIn,
+  useDerivedValue,
   useSharedValue,
   withDelay,
   withRepeat,
@@ -45,6 +50,18 @@ const PLAYER_UPDATE_INTERVAL_MS = 500;
 
 // Passo (ms) usado pelos leitores de tela para avançar/voltar na barra de progresso.
 const ACCESSIBILITY_SEEK_STEP_MS = 10000;
+
+// Medidas visuais da barra do player.
+const PLAY_BUTTON_SIZE = 64;
+const PLAY_ICON_COLOR = "#171323";
+const PROGRESS_TOUCH_HEIGHT = 32;
+const PROGRESS_THUMB_SIZE = 14;
+
+// Efeito de letreiro (marquee) do título da música.
+const MARQUEE_GAP = 44;
+const MARQUEE_START_PAUSE_MS = 1600;
+const MARQUEE_SPEED_PX_PER_MS = 0.04;
+const MARQUEE_FADE_STEPS = 8;
 
 const STORAGE_KEY = "player-de-musica-native";
 
@@ -168,32 +185,52 @@ function formatTime(milliseconds = 0) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function PlayerTitle({ title, styles }) {
+// Título da música com efeito de letreiro: quando o nome é maior que o espaço
+// disponível, ele corre para a esquerda até o fim e o início volta a aparecer
+// logo atrás, em loop contínuo. Nomes curtos ficam parados.
+//
+// O texto fica dentro de um ScrollView horizontal (sem rolagem) porque, nele, o
+// texto é medido sem limite de largura. Em uma View comum o Android corta o
+// texto com "..." e a largura real nunca é descoberta.
+function PlayerTitle({ title, colors, styles }) {
   const [viewportWidth, setViewportWidth] = useState(0);
-  const [contentWidth, setContentWidth] = useState(0);
+  const [textWidth, setTextWidth] = useState(0);
   const offset = useSharedValue(0);
-  const marqueeStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: offset.value }],
+  const isOverflowing = viewportWidth > 0 && textWidth - viewportWidth > 1;
+  const distance = textWidth + MARQUEE_GAP;
+
+  const trackStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: offset.get() }],
   }));
-  const overflow = Math.max(contentWidth - viewportWidth, 0);
+  // A sombra da esquerda só aparece enquanto o texto está em movimento.
+  const leftFadeStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      offset.get(),
+      [-distance, -(distance - 16), -16, 0],
+      [0, 1, 1, 0],
+      Extrapolation.CLAMP,
+    ),
+  }));
 
   useEffect(() => {
     cancelAnimation(offset);
     offset.set(0);
 
-    if (overflow <= 1) return undefined;
+    if (!isOverflowing) return undefined;
 
     offset.set(
       withRepeat(
         withSequence(
           withDelay(
-            900,
-            withTiming(-overflow, {
-              duration: Math.max(1800, overflow * 30),
+            MARQUEE_START_PAUSE_MS,
+            withTiming(-distance, {
+              duration: distance / MARQUEE_SPEED_PX_PER_MS,
               easing: Easing.linear,
             }),
           ),
-          withDelay(1200, withTiming(0, { duration: 0 })),
+          // A segunda cópia do texto está exatamente onde a primeira começou,
+          // então voltar a zero não é perceptível.
+          withTiming(0, { duration: 0 }),
         ),
         -1,
         false,
@@ -201,42 +238,167 @@ function PlayerTitle({ title, styles }) {
     );
 
     return () => cancelAnimation(offset);
-  }, [offset, overflow, title]);
+  }, [distance, isOverflowing, offset, title]);
+
+  const fadeSteps = useMemo(
+    () => Array.from({ length: MARQUEE_FADE_STEPS }, (_, index) => index),
+    [],
+  );
 
   return (
     <View
       style={styles.playerTitleViewport}
       onLayout={(event) => setViewportWidth(event.nativeEvent.layout.width)}
     >
-      <Animated.View
-        onLayout={(event) => setContentWidth(event.nativeEvent.layout.width)}
-        style={[styles.playerTitleTrack, marqueeStyle]}
+      <ScrollView
+        bounces={false}
+        horizontal
+        overScrollMode="never"
+        pointerEvents="none"
+        scrollEnabled={false}
+        showsHorizontalScrollIndicator={false}
+        style={styles.playerTitleScroll}
       >
-        <Text numberOfLines={1} style={[styles.nowPlayingName, styles.playerTitleText]}>
-          {title}
-        </Text>
-      </Animated.View>
+        <Animated.View style={[styles.playerTitleTrack, trackStyle]}>
+          <View
+            onLayout={(event) => setTextWidth(event.nativeEvent.layout.width)}
+            style={styles.playerTitleCopy}
+          >
+            <Text numberOfLines={1} style={styles.nowPlayingName}>
+              {title}
+            </Text>
+          </View>
+          {isOverflowing && (
+            <View style={[styles.playerTitleCopy, { marginLeft: MARQUEE_GAP }]}>
+              <Text numberOfLines={1} style={styles.nowPlayingName}>
+                {title}
+              </Text>
+            </View>
+          )}
+        </Animated.View>
+      </ScrollView>
+      {isOverflowing && (
+        <>
+          <View
+            pointerEvents="none"
+            style={[styles.playerTitleFade, styles.playerTitleFadeRight]}
+          >
+            {fadeSteps.map((step) => (
+              <View
+                key={step}
+                style={{
+                  flex: 1,
+                  backgroundColor: colors.surface,
+                  opacity: Math.pow((step + 1) / MARQUEE_FADE_STEPS, 1.6),
+                }}
+              />
+            ))}
+          </View>
+          <Animated.View
+            pointerEvents="none"
+            style={[styles.playerTitleFade, styles.playerTitleFadeLeft, leftFadeStyle]}
+          >
+            {fadeSteps.map((step) => (
+              <View
+                key={step}
+                style={{
+                  flex: 1,
+                  backgroundColor: colors.surface,
+                  opacity: Math.pow((MARQUEE_FADE_STEPS - step) / MARQUEE_FADE_STEPS, 1.6),
+                }}
+              />
+            ))}
+          </Animated.View>
+        </>
+      )}
     </View>
   );
 }
 
+// Ícone dentro de uma caixa quadrada fixa, sem o espaçamento extra de fonte que
+// o Android adiciona e que deixava o glifo deslocado do centro.
+function CenteredIcon({ color, name, size }) {
+  return (
+    <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
+      <Ionicons
+        color={color}
+        name={name}
+        size={size}
+        style={{
+          width: size,
+          height: size,
+          lineHeight: size,
+          textAlign: "center",
+          textAlignVertical: "center",
+          includeFontPadding: false,
+        }}
+      />
+    </View>
+  );
+}
+
+// Miniatura da música: ícone estático, sem animação.
+function PlayerArtwork({ colors, styles }) {
+  return (
+    <View style={styles.miniArtwork}>
+      <Ionicons name="musical-notes" size={20} color={colors.accent} />
+    </View>
+  );
+}
+
+// Pontinho do rótulo "TOCANDO AGORA": pulsa enquanto a música toca.
+function LiveDot({ isPlaying, styles }) {
+  const pulse = useSharedValue(0);
+
+  useEffect(() => {
+    cancelAnimation(pulse);
+    if (isPlaying) {
+      pulse.set(
+        withRepeat(
+          withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.quad) }),
+          -1,
+          true,
+        ),
+      );
+    } else {
+      pulse.set(withTiming(0, { duration: 240 }));
+    }
+    return () => cancelAnimation(pulse);
+  }, [isPlaying, pulse]);
+
+  const dotStyle = useAnimatedStyle(() => ({
+    opacity: 0.4 + pulse.get() * 0.6,
+  }));
+
+  return <Animated.View style={[styles.liveDot, dotStyle]} />;
+}
+
+// Botão de controle (anterior / próxima). Ao tocar, o botão encolhe um pouco e o
+// ícone dá um pequeno empurrão na direção `nudge`, voltando com um quique.
 function PlayerControlButton({
   accessibilityLabel,
   children,
   disabled,
+  nudge = 0,
   onPress,
   style,
 }) {
   const scale = useSharedValue(1);
+  const nudgeX = useSharedValue(0);
   const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
+    transform: [{ scale: scale.get() }],
+  }));
+  const iconStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: nudgeX.get() }],
   }));
   const handlePressIn = useCallback(() => {
-    scale.set(withSpring(0.94, { damping: 18, stiffness: 380 }));
-  }, [scale]);
+    scale.set(withSpring(0.9, { damping: 18, stiffness: 380 }));
+    nudgeX.set(withSpring(nudge, { damping: 12, stiffness: 320 }));
+  }, [nudge, nudgeX, scale]);
   const handlePressOut = useCallback(() => {
-    scale.set(withSpring(1, { damping: 16, stiffness: 300 }));
-  }, [scale]);
+    scale.set(withSpring(1, { damping: 10, stiffness: 260 }));
+    nudgeX.set(withSpring(0, { damping: 8, stiffness: 240 }));
+  }, [nudgeX, scale]);
 
   return (
     <AnimatedPressable
@@ -247,8 +409,140 @@ function PlayerControlButton({
       onPressOut={handlePressOut}
       style={[style, animatedStyle]}
     >
-      {children}
+      <Animated.View style={iconStyle}>{children}</Animated.View>
     </AnimatedPressable>
+  );
+}
+
+// Triângulo do play com cantos arredondados, desenhado só com Views: um
+// triângulo reto preenchido por dentro e três barras de pontas redondas sobre
+// as arestas (como um traço com "round join"). A caixa tem o tamanho exato do
+// desenho, então o centralizador do botão o deixa no centro de verdade.
+const PLAY_ROUND = 6; // espessura do traço = diâmetro dos cantos
+const PLAY_HEIGHT = 20; // altura do triângulo (linha central do traço)
+const PLAY_WIDTH = 18; // largura do triângulo (linha central do traço)
+const PLAY_BOX_WIDTH = PLAY_WIDTH + PLAY_ROUND;
+const PLAY_BOX_HEIGHT = PLAY_HEIGHT + PLAY_ROUND;
+const PLAY_EDGE_LENGTH = Math.hypot(PLAY_WIDTH, PLAY_HEIGHT / 2);
+const PLAY_EDGE_ANGLE = (Math.atan2(PLAY_HEIGHT / 2, PLAY_WIDTH) * 180) / Math.PI;
+
+function PlayTriangle({ color }) {
+  const half = PLAY_ROUND / 2;
+  const edgeWidth = PLAY_EDGE_LENGTH + PLAY_ROUND;
+  const edgeCenterX = half + PLAY_WIDTH / 2;
+  const bar = {
+    position: "absolute",
+    height: PLAY_ROUND,
+    borderRadius: half,
+    backgroundColor: color,
+  };
+  return (
+    // O peso visual do triângulo fica na base; 2 px à direita o centraliza ao olhar.
+    <View
+      style={{
+        width: PLAY_BOX_WIDTH,
+        height: PLAY_BOX_HEIGHT,
+        transform: [{ translateX: 2 }],
+      }}
+    >
+      <View
+        style={{
+          position: "absolute",
+          left: half,
+          top: half,
+          width: 0,
+          height: 0,
+          borderTopWidth: PLAY_HEIGHT / 2,
+          borderBottomWidth: PLAY_HEIGHT / 2,
+          borderLeftWidth: PLAY_WIDTH,
+          borderTopColor: "transparent",
+          borderBottomColor: "transparent",
+          borderLeftColor: color,
+        }}
+      />
+      <View
+        style={{
+          ...bar,
+          left: 0,
+          top: 0,
+          width: PLAY_ROUND,
+          height: PLAY_BOX_HEIGHT,
+        }}
+      />
+      <View
+        style={{
+          ...bar,
+          left: edgeCenterX - edgeWidth / 2,
+          top: half + PLAY_HEIGHT / 4 - half,
+          width: edgeWidth,
+          transform: [{ rotate: `${PLAY_EDGE_ANGLE}deg` }],
+        }}
+      />
+      <View
+        style={{
+          ...bar,
+          left: edgeCenterX - edgeWidth / 2,
+          top: half + (PLAY_HEIGHT * 3) / 4 - half,
+          width: edgeWidth,
+          transform: [{ rotate: `${-PLAY_EDGE_ANGLE}deg` }],
+        }}
+      />
+    </View>
+  );
+}
+
+// Botão principal: o ícone troca entre play e pause com um zoom curto e a forma
+// do botão passa de círculo para um quadrado arredondado.
+function PlayPauseButton({ accessibilityLabel, disabled, isPlaying, onPress, styles }) {
+  const scale = useSharedValue(1);
+  const playing = useSharedValue(isPlaying ? 1 : 0);
+
+  useEffect(() => {
+    playing.set(
+      withSpring(isPlaying ? 1 : 0, { damping: 13, stiffness: 190, mass: 0.8 }),
+    );
+  }, [isPlaying, playing]);
+
+  const buttonStyle = useAnimatedStyle(() => ({
+    borderRadius: interpolate(
+      playing.get(),
+      [0, 1],
+      [PLAY_BUTTON_SIZE / 2, PLAY_BUTTON_SIZE * 0.36],
+      Extrapolation.CLAMP,
+    ),
+    transform: [{ scale: scale.get() }],
+  }));
+  const handlePressIn = useCallback(() => {
+    scale.set(withSpring(0.9, { damping: 18, stiffness: 380 }));
+  }, [scale]);
+  const handlePressOut = useCallback(() => {
+    scale.set(withSpring(1, { damping: 8, stiffness: 240 }));
+  }, [scale]);
+
+  return (
+    <View style={styles.playButtonWrap}>
+      <AnimatedPressable
+        accessibilityLabel={accessibilityLabel}
+        disabled={disabled}
+        onPress={onPress}
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        style={[styles.playButton, disabled && styles.disabledPlayButton, buttonStyle]}
+      >
+        {/* Só um ícone existe por vez, centralizado pelo próprio botão. A
+            troca é um "zoom" curto; o key faz o ícone novo entrar animado. */}
+        {isPlaying ? (
+          <Animated.View key="pause" entering={ZoomIn.duration(180)} style={styles.pauseBars}>
+            <View style={styles.pauseBar} />
+            <View style={styles.pauseBar} />
+          </Animated.View>
+        ) : (
+          <Animated.View key="play" entering={ZoomIn.duration(180)}>
+            <PlayTriangle color={PLAY_ICON_COLOR} />
+          </Animated.View>
+        )}
+      </AnimatedPressable>
+    </View>
   );
 }
 
@@ -417,104 +711,142 @@ function createStyles(colors) {
       borderTopWidth: 1,
       borderTopColor: colors.border,
       backgroundColor: colors.surface,
-      paddingHorizontal: 18,
-      paddingTop: 14,
-      paddingBottom: Platform.OS === "ios" ? 7 : 10,
-      gap: 11,
+      paddingHorizontal: 22,
+      paddingTop: 18,
+      paddingBottom: Platform.OS === "ios" ? 10 : 16,
+      gap: 16,
     },
     playerTrack: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 12,
+      gap: 14,
     },
     miniArtwork: {
-      width: 44,
-      height: 44,
-      borderRadius: 14,
+      width: 56,
+      height: 56,
+      borderRadius: 20,
       backgroundColor: colors.surfaceRaised,
       alignItems: "center",
       justifyContent: "center",
       borderWidth: 1,
       borderColor: colors.border,
     },
-    nowPlayingLabel: {
-      color: colors.muted,
-      fontSize: 9,
-      fontWeight: "700",
-      letterSpacing: 0.9,
-      marginBottom: 2,
+    playerInfo: { flex: 1, minWidth: 0, gap: 4 },
+    nowPlayingRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+    liveDot: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: colors.accent,
     },
-    nowPlayingName: { color: colors.text, fontSize: 14, fontWeight: "700" },
-    playerTitleViewport: { flex: 1, minWidth: 0, overflow: "hidden" },
-    playerTitleTrack: { alignSelf: "flex-start", flexDirection: "row", flexShrink: 0 },
-    playerTitleText: { flexShrink: 0 },
+    nowPlayingLabel: {
+      color: colors.accent,
+      fontSize: 10,
+      fontWeight: "800",
+      letterSpacing: 1.3,
+    },
+    nowPlayingName: {
+      color: colors.text,
+      fontSize: 17,
+      lineHeight: 24,
+      fontWeight: "700",
+      letterSpacing: -0.2,
+    },
+    playerTitleViewport: { height: 24, minWidth: 0, overflow: "hidden" },
+    playerTitleScroll: { flexGrow: 0, height: 24 },
+    playerTitleTrack: { flexDirection: "row", alignItems: "center" },
+    playerTitleCopy: { flexShrink: 0 },
+    playerTitleFade: {
+      position: "absolute",
+      top: 0,
+      bottom: 0,
+      width: 24,
+      flexDirection: "row",
+    },
+    playerTitleFadeRight: { right: 0 },
+    playerTitleFadeLeft: { left: 0 },
     playerControls: {
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
-      gap: 16,
+      gap: 24,
     },
     skipButton: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      borderWidth: 1,
-      borderColor: colors.border,
+      width: 52,
+      height: 52,
+      borderRadius: 26,
       backgroundColor: colors.surfaceRaised,
       alignItems: "center",
       justifyContent: "center",
     },
-    playButton: {
-      width: 46,
-      height: 46,
-      borderRadius: 23,
-      backgroundColor: colors.accentStrong,
+    playButtonWrap: {
+      width: PLAY_BUTTON_SIZE,
+      height: PLAY_BUTTON_SIZE,
       alignItems: "center",
       justifyContent: "center",
-      shadowColor: colors.accentStrong,
-      shadowOffset: { width: 0, height: 3 },
-      shadowOpacity: 0.24,
-      shadowRadius: 7,
-      elevation: 3,
+    },
+    playButton: {
+      width: PLAY_BUTTON_SIZE,
+      height: PLAY_BUTTON_SIZE,
+      backgroundColor: colors.accent,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    // Play e pause são desenhados com Views (e não com a fonte de ícones) para
+    // ficarem exatamente centralizados.
+    pauseBars: { flexDirection: "row", alignItems: "center", gap: 6 },
+    pauseBar: {
+      width: 7,
+      height: 24,
+      borderRadius: 3,
+      backgroundColor: PLAY_ICON_COLOR,
     },
     disabledPlayButton: { opacity: 0.55 },
-    // Área de toque maior que a trilha visual (5 px); as margens negativas
-    // mantêm o layout com a mesma altura de antes.
+    progressRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+    },
+    progressSliderWrap: { flex: 1 },
+    // Área de toque maior que a trilha visual (6 px); as margens negativas
+    // mantêm o layout com a mesma altura da trilha.
     progressTouchArea: {
-      height: 32,
-      marginVertical: -13.5,
+      height: PROGRESS_TOUCH_HEIGHT,
+      marginVertical: -13,
       justifyContent: "center",
       position: "relative",
     },
     progressTrack: {
-      height: 4,
-      borderRadius: 4,
+      height: 6,
+      borderRadius: 3,
       backgroundColor: colors.border,
       overflow: "hidden",
     },
     progressFill: {
       width: "100%",
       height: "100%",
-      borderRadius: 4,
+      borderRadius: 3,
       backgroundColor: colors.accent,
     },
     progressThumb: {
       position: "absolute",
       left: 0,
-      top: 10,
-      width: 12,
-      height: 12,
-      borderRadius: 6,
+      top: (PROGRESS_TOUCH_HEIGHT - PROGRESS_THUMB_SIZE) / 2,
+      width: PROGRESS_THUMB_SIZE,
+      height: PROGRESS_THUMB_SIZE,
+      borderRadius: PROGRESS_THUMB_SIZE / 2,
       borderWidth: 2,
-      borderColor: colors.background,
+      borderColor: colors.surface,
       backgroundColor: colors.accent,
     },
-    playerTimes: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      marginTop: 5,
+    timeText: {
+      color: colors.muted,
+      fontSize: 12,
+      fontWeight: "600",
+      minWidth: 36,
+      fontVariant: ["tabular-nums"],
     },
-    timeText: { color: colors.muted, fontSize: 11 },
+    timeTextEnd: { textAlign: "right" },
     modalBackdrop: {
       flex: 1,
       backgroundColor: "rgba(0,0,0,0.62)",
@@ -965,9 +1297,17 @@ const ProgressSlider = React.memo(function ProgressSlider({
       { translateX: (animatedProgress.get() - 1) * sliderWidth.get() },
     ],
   }));
+  // A bolinha cresce com um quique enquanto o dedo está na barra.
+  const thumbScale = useDerivedValue(() =>
+    withSpring(isDragging.get() ? 1.4 : 1, { damping: 13, stiffness: 280 }),
+  );
   const thumbStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateX: animatedProgress.get() * sliderWidth.get() - 6 },
+      {
+        translateX:
+          animatedProgress.get() * sliderWidth.get() - PROGRESS_THUMB_SIZE / 2,
+      },
+      { scale: thumbScale.get() },
     ],
   }));
 
@@ -1844,62 +2184,64 @@ export default function App() {
 
         <View style={styles.playerBar}>
           <View style={styles.playerTrack}>
-            <View style={styles.miniArtwork}>
-              <Ionicons name="musical-notes" size={20} color={colors.accent} />
+            <PlayerArtwork colors={colors} styles={styles} />
+            <View style={styles.playerInfo}>
+              <View style={styles.nowPlayingRow}>
+                <LiveDot isPlaying={playback.isPlaying} styles={styles} />
+                <Text style={styles.nowPlayingLabel}>TOCANDO AGORA</Text>
+              </View>
+              <PlayerTitle colors={colors} title={currentTitle} styles={styles} />
             </View>
-            <View style={styles.cardText}>
-              <Text style={styles.nowPlayingLabel}>TOCANDO AGORA</Text>
-              <PlayerTitle title={currentTitle} styles={styles} />
+          </View>
+          <View style={styles.progressRow}>
+            <Text style={styles.timeText}>{formatTime(playback.positionMillis)}</Text>
+            <View style={styles.progressSliderWrap}>
+              <ProgressSlider
+                durationMillis={playback.durationMillis}
+                isPlaying={playback.isPlaying}
+                onSeek={seekToProgress}
+                progress={progress}
+                styles={styles}
+              />
             </View>
+            <Text style={[styles.timeText, styles.timeTextEnd]}>
+              {formatTime(playback.durationMillis)}
+            </Text>
           </View>
           <View style={styles.playerControls}>
             <PlayerControlButton
               accessibilityLabel="Música anterior"
               disabled={!currentSong}
+              nudge={-4}
               onPress={() => skipSong(-1)}
               style={styles.skipButton}
             >
-              <Ionicons
+              <CenteredIcon
                 name="play-skip-back"
-                size={19}
+                size={22}
                 color={currentSong ? colors.text : colors.muted}
               />
             </PlayerControlButton>
-            <PlayerControlButton
+            <PlayPauseButton
               accessibilityLabel={playback.isPlaying ? "Pausar música" : "Reproduzir música"}
               disabled={!currentSong}
+              isPlaying={playback.isPlaying}
               onPress={togglePlayback}
-              style={[styles.playButton, !currentSong && styles.disabledPlayButton]}
-            >
-              <Ionicons
-                name={playback.isPlaying ? "pause" : "play"}
-                size={23}
-                color="#272039"
-              />
-            </PlayerControlButton>
+              styles={styles}
+            />
             <PlayerControlButton
               accessibilityLabel="Próxima música"
               disabled={!currentSong}
+              nudge={4}
               onPress={() => skipSong(1)}
               style={styles.skipButton}
             >
-              <Ionicons
+              <CenteredIcon
                 name="play-skip-forward"
-                size={19}
+                size={22}
                 color={currentSong ? colors.text : colors.muted}
               />
             </PlayerControlButton>
-          </View>
-          <ProgressSlider
-            durationMillis={playback.durationMillis}
-            isPlaying={playback.isPlaying}
-            onSeek={seekToProgress}
-            progress={progress}
-            styles={styles}
-          />
-          <View style={styles.playerTimes}>
-            <Text style={styles.timeText}>{formatTime(playback.positionMillis)}</Text>
-            <Text style={styles.timeText}>{formatTime(playback.durationMillis)}</Text>
           </View>
         </View>
       </View>
