@@ -1,0 +1,11 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'expo.modules.devicemusic'
+version = '1.0.0'
+
+android {
+  namespace "expo.modules.devicemusic"
+}
