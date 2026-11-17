@@ -14,6 +14,7 @@ import {
   Switch,
   Text,
   TextInput,
+  useColorScheme,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -67,7 +68,6 @@ const STORAGE_KEY = "player-de-musica-native";
 const DEFAULT_SETTINGS = {
   autoAdvance: true,
   shuffle: false,
-  lightMode: false,
 };
 
 const DARK = {
@@ -1459,6 +1459,8 @@ const ProgressSlider = React.memo(function ProgressSlider({
 });
 
 export default function App() {
+  const colorScheme = useColorScheme();
+  const lightMode = colorScheme === "light";
   const [songs, setSongs] = useState([]);
   const [playlists, setPlaylists] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -1484,10 +1486,10 @@ export default function App() {
   const playbackHistoryRef = useRef([]);
   const settingsRef = useRef(settings);
   const styles = useMemo(
-    () => createStyles(settings.lightMode ? LIGHT : DARK),
-    [settings.lightMode],
+    () => createStyles(lightMode ? LIGHT : DARK),
+    [lightMode],
   );
-  const colors = settings.lightMode ? LIGHT : DARK;
+  const colors = lightMode ? LIGHT : DARK;
 
   const customPlaylist = useMemo(
     () => playlists.find((playlist) => playlist.id === activePlaylistId) || null,
@@ -1590,10 +1592,6 @@ export default function App() {
                 ...DEFAULT_SETTINGS,
                 autoAdvance,
                 shuffle: savedSettings.shuffle === true && !autoAdvance,
-                lightMode:
-                  typeof savedSettings.lightMode === "boolean"
-                    ? savedSettings.lightMode
-                    : DEFAULT_SETTINGS.lightMode,
               });
             }
           }
@@ -2145,7 +2143,7 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar
-        barStyle={settings.lightMode ? "dark-content" : "light-content"}
+        barStyle={lightMode ? "dark-content" : "light-content"}
         backgroundColor={colors.header}
       />
       <View style={[styles.screen, Platform.OS === "web" && styles.webShell]}>
@@ -2293,11 +2291,6 @@ export default function App() {
                 title: "Ordem aleatória",
                 detail: "Escolher outra faixa aleatória",
               },
-              {
-                key: "lightMode",
-                title: "Modo claro",
-                detail: "Usar a interface clara",
-              },
             ].map((setting, index) => (
               <React.Fragment key={setting.key}>
                 {index > 0 && <View style={styles.divider} />}
@@ -2310,7 +2303,7 @@ export default function App() {
                     value={settings[setting.key]}
                     onValueChange={(value) => setPlayerSetting(setting.key, value)}
                     trackColor={{ false: colors.border, true: colors.accent }}
-                    thumbColor={settings.lightMode ? "#fff" : "#f7f5ff"}
+                    thumbColor={lightMode ? "#fff" : "#f7f5ff"}
                   />
                 </View>
               </React.Fragment>
