@@ -531,7 +531,9 @@ function PlayPauseButton({ accessibilityLabel, disabled, isPlaying, onPress, sty
       >
         {/* Só um ícone existe por vez, centralizado pelo próprio botão. A
             troca é um "zoom" curto; o key faz o ícone novo entrar animado. */}
-        {isPlaying ? (
+        {disabled ? (
+          <CenteredIcon color={PLAY_ICON_COLOR} name="play" size={32} />
+        ) : isPlaying ? (
           <Animated.View key="pause" entering={ZoomIn.duration(180)} style={styles.pauseBars}>
             <View style={styles.pauseBar} />
             <View style={styles.pauseBar} />
