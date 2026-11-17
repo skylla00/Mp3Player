@@ -15,6 +15,11 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
+import {
+  Gesture,
+  GestureDetector,
+  GestureHandlerRootView,
+} from "react-native-gesture-handler";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, {
   Easing,
@@ -67,12 +72,15 @@ function createStyles(colors) {
       overflow: "hidden",
     },
     handle: {
-      alignSelf: "center",
       width: 40,
       height: 4,
       borderRadius: 2,
-      marginTop: 10,
       backgroundColor: colors.border,
+    },
+    handleArea: {
+      height: 38,
+      alignItems: "center",
+      justifyContent: "center",
     },
     header: {
       flexDirection: "row",
@@ -339,6 +347,7 @@ function SheetContent({
   addedLabel,
   targetLabel,
   bottomInset,
+  handleGesture,
   onClose,
   onConfirm,
   onRequestAccess,
@@ -484,7 +493,11 @@ function SheetContent({
 
   return (
     <>
-      <View style={styles.handle} />
+      <GestureDetector gesture={handleGesture}>
+        <View style={styles.handleArea}>
+          <View style={styles.handle} />
+        </View>
+      </GestureDetector>
       <View style={styles.header}>
         <View style={styles.headerText}>
           <Text style={styles.title}>Adicionar músicas</Text>
@@ -558,9 +571,42 @@ export default function SongPickerSheet({
   const unmount = useCallback(() => setMounted(false), []);
 
   const progress = useSharedValue(0);
+  const dragY = useSharedValue(0);
+
+  const handleGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .minDistance(4)
+        .onUpdate((event) => {
+          dragY.set(Math.max(event.translationY, 0));
+        })
+        .onEnd((event) => {
+          if (
+            event.translationY > sheetHeight * 0.22 ||
+            event.velocityY > 900
+          ) {
+            scheduleOnRN(onClose);
+          } else {
+            dragY.set(
+              withTiming(0, { duration: 180, easing: Easing.out(Easing.cubic) }),
+            );
+          }
+        })
+        .onFinalize((_event, success) => {
+          if (!success) {
+            dragY.set(
+              withTiming(0, { duration: 180, easing: Easing.out(Easing.cubic) }),
+            );
+          }
+        }),
+    [dragY, onClose, sheetHeight],
+  );
 
   useEffect(() => {
     if (visible) {
+      dragY.set(
+        withTiming(0, { duration: 180, easing: Easing.out(Easing.cubic) }),
+      );
       progress.set(
         withTiming(1, { duration: 340, easing: Easing.out(Easing.cubic) }),
       );
@@ -576,13 +622,15 @@ export default function SongPickerSheet({
         ),
       );
     }
-  }, [visible, progress, unmount]);
+  }, [visible, dragY, progress, unmount]);
 
   const backdropStyle = useAnimatedStyle(() => ({
-    opacity: progress.get(),
+    opacity: progress.get() * Math.max(0, 1 - dragY.get() / sheetHeight),
   }));
   const sheetStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: (1 - progress.get()) * sheetHeight }],
+    transform: [
+      { translateY: (1 - progress.get()) * sheetHeight + dragY.get() },
+    ],
   }));
 
   return (
@@ -594,30 +642,33 @@ export default function SongPickerSheet({
       statusBarTranslucent
       navigationBarTranslucent
     >
-      <View style={styles.root}>
-        <Animated.View style={[styles.backdrop, backdropStyle]}>
-          <Pressable
-            accessibilityLabel="Fechar"
-            onPress={onClose}
-            style={StyleSheet.absoluteFill}
-          />
-        </Animated.View>
-        <Animated.View style={[styles.sheet, { height: sheetHeight }, sheetStyle]}>
-          <SheetContent
-            colors={colors}
-            styles={styles}
-            scan={scan}
-            addedIds={addedIds}
-            addedLabel={addedLabel}
-            targetLabel={targetLabel}
-            bottomInset={insets.bottom}
-            onClose={onClose}
-            onConfirm={onConfirm}
-            onRequestAccess={onRequestAccess}
-            onOpenSettings={onOpenSettings}
-          />
-        </Animated.View>
-      </View>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <View style={styles.root}>
+          <Animated.View style={[styles.backdrop, backdropStyle]}>
+            <Pressable
+              accessibilityLabel="Fechar"
+              onPress={onClose}
+              style={StyleSheet.absoluteFill}
+            />
+          </Animated.View>
+          <Animated.View style={[styles.sheet, { height: sheetHeight }, sheetStyle]}>
+            <SheetContent
+              colors={colors}
+              styles={styles}
+              scan={scan}
+              addedIds={addedIds}
+              addedLabel={addedLabel}
+              targetLabel={targetLabel}
+              bottomInset={insets.bottom}
+              handleGesture={handleGesture}
+              onClose={onClose}
+              onConfirm={onConfirm}
+              onRequestAccess={onRequestAccess}
+              onOpenSettings={onOpenSettings}
+            />
+          </Animated.View>
+        </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
