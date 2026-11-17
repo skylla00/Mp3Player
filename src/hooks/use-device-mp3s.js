@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
+import { getMusicAssetIds } from "@/modules/device-music";
 // Na SDK 57 a API baseada em funções (getAssetsAsync etc.) fica em "/legacy".
 // É ela que devolve o `uri` de cada arquivo já na listagem, sem uma chamada extra por faixa.
 import * as MediaLibrary from "expo-media-library/legacy";
@@ -33,7 +34,7 @@ function compareByName(a, b) {
 }
 
 /**
- * Procura todos os arquivos .mp3 do aparelho e guarda a lista em memória.
+ * Procura arquivos .mp3 marcados como música pelo Android e guarda a lista em memória.
  * Nada aparece na interface até o usuário abrir a janela de "Adicionar música".
  *
  * status: "idle" | "loading" | "ready" | "denied" | "error"
@@ -102,6 +103,7 @@ export function useDeviceMp3s() {
       );
 
       const found = [];
+      const musicAssetIds = new Set(await getMusicAssetIds());
       let after;
       let hasNextPage = true;
       while (hasNextPage) {
@@ -113,7 +115,12 @@ export function useDeviceMp3s() {
         for (const asset of page.assets) {
           const isTooShort =
             asset.duration > 0 && asset.duration < MIN_DURATION_SECONDS;
-          if (asset.uri && MP3_FILE.test(asset.filename || "") && !isTooShort) {
+          if (
+            asset.uri &&
+            musicAssetIds.has(String(asset.id)) &&
+            MP3_FILE.test(asset.filename || "") &&
+            !isTooShort
+          ) {
             found.push(toSong(asset));
           }
         }

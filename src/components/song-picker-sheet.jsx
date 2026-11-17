@@ -139,22 +139,36 @@ function createStyles(colors) {
       backgroundColor: colors.header,
       paddingHorizontal: 16,
       paddingTop: 12,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 12,
+      gap: 10,
     },
     footerCount: {
-      flex: 1,
       color: colors.muted,
       fontSize: 13,
       fontWeight: "600",
     },
+    footerActions: {
+      flexDirection: "row",
+      gap: 8,
+    },
     confirmButton: {
       minHeight: 46,
-      minWidth: 144,
+      flex: 1,
       borderRadius: 13,
       backgroundColor: colors.accent,
-      paddingHorizontal: 22,
+      paddingHorizontal: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+    },
+    addAllButton: {
+      minHeight: 46,
+      flex: 1,
+      borderRadius: 13,
+      borderWidth: 1,
+      borderColor: colors.accent,
+      backgroundColor: colors.surfaceRaised,
+      paddingHorizontal: 8,
       flexDirection: "row",
       alignItems: "center",
       justifyContent: "center",
@@ -367,6 +381,10 @@ function SheetContent({
     () => ordered.filter((song) => selected.has(song.id)),
     [ordered, selected],
   );
+  const availableSongs = useMemo(
+    () => ordered.filter((song) => !addedIds.has(song.id)),
+    [ordered, addedIds],
+  );
   const chosenCount = chosen.length;
 
   useEffect(() => {
@@ -386,6 +404,10 @@ function SheetContent({
       return next;
     });
   }, []);
+
+  const addAll = useCallback(() => {
+    if (availableSongs.length) onConfirm(availableSongs);
+  }, [availableSongs, onConfirm]);
 
   const renderItem = useCallback(
     ({ item }) => (
@@ -522,19 +544,41 @@ function SheetContent({
         >
           <Text numberOfLines={1} style={styles.footerCount}>
             {chosenCount === 0
-              ? "Marque as músicas que quer adicionar"
+              ? availableSongs.length
+                ? `${availableSongs.length} ${availableSongs.length === 1 ? "música disponível" : "músicas disponíveis"} para adicionar`
+                : "Todas as músicas já estão adicionadas"
               : `${chosenCount} ${chosenCount === 1 ? "selecionada" : "selecionadas"}`}
           </Text>
-          <AnimatedPressable
-            accessibilityRole="button"
-            accessibilityState={{ disabled: chosenCount === 0 }}
-            disabled={chosenCount === 0}
-            onPress={() => onConfirm(chosen)}
-            style={[styles.confirmButton, confirmStyle]}
-          >
-            <Ionicons name="add" size={18} color={colors.buttonForeground} />
-            <Text style={styles.confirmText}>Adicionar</Text>
-          </AnimatedPressable>
+          <View style={styles.footerActions}>
+            <AnimatedPressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: chosenCount === 0 }}
+              disabled={chosenCount === 0}
+              onPress={() => onConfirm(chosen)}
+              style={[styles.confirmButton, confirmStyle]}
+            >
+              <Ionicons name="add" size={18} color={colors.buttonForeground} />
+              <Text numberOfLines={1} style={styles.confirmText}>
+                Adicionar
+              </Text>
+            </AnimatedPressable>
+            <Pressable
+              accessibilityLabel="Adicionar todas as músicas disponíveis"
+              accessibilityRole="button"
+              accessibilityState={{ disabled: availableSongs.length === 0 }}
+              disabled={availableSongs.length === 0}
+              onPress={addAll}
+              style={[
+                styles.addAllButton,
+                availableSongs.length === 0 && styles.rowAdded,
+              ]}
+            >
+              <Ionicons name="add-circle-outline" size={18} color={colors.accent} />
+              <Text numberOfLines={1} style={[styles.confirmText, { color: colors.accent }]}>
+                Adicionar todas
+              </Text>
+            </Pressable>
+          </View>
         </View>
       )}
     </>
