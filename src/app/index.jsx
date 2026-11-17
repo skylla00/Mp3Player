@@ -68,6 +68,7 @@ const STORAGE_KEY = "player-de-musica-native";
 const DEFAULT_SETTINGS = {
   autoAdvance: true,
   shuffle: false,
+  themeMode: "system",
 };
 
 const DARK = {
@@ -374,8 +375,7 @@ function LiveDot({ isPlaying, styles }) {
   return <Animated.View style={[styles.liveDot, dotStyle]} />;
 }
 
-// Botão de controle (anterior / próxima). Ao tocar, o botão encolhe um pouco e o
-// ícone dá um pequeno empurrão na direção `nudge`, voltando com um quique.
+// Botão de controle (anterior / próxima) com um feedback sutil ao toque.
 function PlayerControlButton({
   accessibilityLabel,
   children,
@@ -393,12 +393,12 @@ function PlayerControlButton({
     transform: [{ translateX: nudgeX.get() }],
   }));
   const handlePressIn = useCallback(() => {
-    scale.set(withSpring(0.9, { damping: 18, stiffness: 380 }));
-    nudgeX.set(withSpring(nudge, { damping: 12, stiffness: 320 }));
+    scale.set(withSpring(0.96, { damping: 22, stiffness: 300 }));
+    nudgeX.set(withSpring(nudge * 0.5, { damping: 22, stiffness: 280 }));
   }, [nudge, nudgeX, scale]);
   const handlePressOut = useCallback(() => {
-    scale.set(withSpring(1, { damping: 10, stiffness: 260 }));
-    nudgeX.set(withSpring(0, { damping: 8, stiffness: 240 }));
+    scale.set(withSpring(1, { damping: 22, stiffness: 300 }));
+    nudgeX.set(withSpring(0, { damping: 22, stiffness: 280 }));
   }, [nudgeX, scale]);
 
   return (
@@ -891,6 +891,25 @@ function createStyles(colors) {
     },
     settingText: { color: colors.text, fontSize: 14, fontWeight: "600" },
     settingDetail: { color: colors.muted, fontSize: 12, marginTop: 4 },
+    themeSetting: { gap: 10 },
+    themeOptions: { flexDirection: "row", gap: 8 },
+    themeOption: {
+      flex: 1,
+      minHeight: 42,
+      paddingHorizontal: 4,
+      borderRadius: 11,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceRaised,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    themeOptionSelected: {
+      borderColor: colors.accent,
+      backgroundColor: colors.accent,
+    },
+    themeOptionText: { color: colors.muted, fontSize: 12, fontWeight: "600" },
+    themeOptionTextSelected: { color: colors.buttonForeground },
     divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
     modalActions: { flexDirection: "row", gap: 10, justifyContent: "flex-end" },
     modalActionButton: {
@@ -1460,7 +1479,6 @@ const ProgressSlider = React.memo(function ProgressSlider({
 
 export default function App() {
   const colorScheme = useColorScheme();
-  const lightMode = colorScheme === "light";
   const [songs, setSongs] = useState([]);
   const [playlists, setPlaylists] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -1485,6 +1503,9 @@ export default function App() {
   const currentQueueRef = useRef([]);
   const playbackHistoryRef = useRef([]);
   const settingsRef = useRef(settings);
+  const lightMode =
+    settings.themeMode === "light" ||
+    (settings.themeMode === "system" && colorScheme === "light");
   const styles = useMemo(
     () => createStyles(lightMode ? LIGHT : DARK),
     [lightMode],
@@ -1588,10 +1609,21 @@ export default function App() {
                 typeof savedSettings.autoAdvance === "boolean"
                   ? savedSettings.autoAdvance
                   : DEFAULT_SETTINGS.autoAdvance;
+              const themeMode =
+                savedSettings.themeMode === "light" ||
+                savedSettings.themeMode === "dark" ||
+                savedSettings.themeMode === "system"
+                  ? savedSettings.themeMode
+                  : typeof savedSettings.lightMode === "boolean"
+                    ? savedSettings.lightMode
+                      ? "light"
+                      : "dark"
+                    : DEFAULT_SETTINGS.themeMode;
               setSettings({
                 ...DEFAULT_SETTINGS,
                 autoAdvance,
                 shuffle: savedSettings.shuffle === true && !autoAdvance,
+                themeMode,
               });
             }
           }
@@ -2308,6 +2340,40 @@ export default function App() {
                 </View>
               </React.Fragment>
             ))}
+            <View style={styles.divider} />
+            <View style={styles.themeSetting}>
+              <Text style={styles.settingText}>Tema</Text>
+              <View style={styles.themeOptions}>
+                {[
+                  { value: "system", label: "Sistema" },
+                  { value: "light", label: "Claro" },
+                  { value: "dark", label: "Escuro" },
+                ].map((option) => {
+                  const selected = settings.themeMode === option.value;
+                  return (
+                    <Pressable
+                      key={option.value}
+                      accessibilityRole="radio"
+                      accessibilityState={{ checked: selected }}
+                      onPress={() => setPlayerSetting("themeMode", option.value)}
+                      style={[
+                        styles.themeOption,
+                        selected && styles.themeOptionSelected,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.themeOptionText,
+                          selected && styles.themeOptionTextSelected,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
             <View style={styles.modalActions}>
               <Pressable
                 onPress={() => setSettingsOpen(false)}
