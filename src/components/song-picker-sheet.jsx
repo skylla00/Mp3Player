@@ -36,9 +36,6 @@ import { scheduleOnRN } from "react-native-worklets";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-// Cor do texto/ícone sobre o destaque (a mesma usada nos botões primários do app).
-const ON_ACCENT = "#171323";
-
 // Altura fixa dos cartões: permite o getItemLayout e uma rolagem fluida
 // mesmo com milhares de músicas.
 const ROW_HEIGHT = 66;
@@ -163,7 +160,7 @@ function createStyles(colors) {
       justifyContent: "center",
       gap: 8,
     },
-    confirmText: { color: ON_ACCENT, fontSize: 14, fontWeight: "700" },
+    confirmText: { color: colors.buttonForeground, fontSize: 14, fontWeight: "700" },
     stateBox: {
       flex: 1,
       alignItems: "center",
@@ -295,7 +292,7 @@ const PickerRow = React.memo(function PickerRow({
       ) : (
         <Animated.View style={[styles.checkbox, boxStyle]}>
           <Animated.View style={checkStyle}>
-            <Ionicons name="checkmark" size={16} color={ON_ACCENT} />
+            <Ionicons name="checkmark" size={16} color={colors.buttonForeground} />
           </Animated.View>
         </Animated.View>
       )}
@@ -535,7 +532,7 @@ function SheetContent({
             onPress={() => onConfirm(chosen)}
             style={[styles.confirmButton, confirmStyle]}
           >
-            <Ionicons name="add" size={18} color={ON_ACCENT} />
+            <Ionicons name="add" size={18} color={colors.buttonForeground} />
             <Text style={styles.confirmText}>Adicionar</Text>
           </AnimatedPressable>
         </View>

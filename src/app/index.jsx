@@ -53,7 +53,6 @@ const ACCESSIBILITY_SEEK_STEP_MS = 10000;
 
 // Medidas visuais da barra do player.
 const PLAY_BUTTON_SIZE = 64;
-const PLAY_ICON_COLOR = "#171323";
 const PROGRESS_TOUCH_HEIGHT = 32;
 const PROGRESS_THUMB_SIZE = 14;
 
@@ -80,20 +79,22 @@ const DARK = {
   muted: "#aaa6b8",
   accent: "#a98cff",
   accentStrong: "#c5b4ff",
+  buttonForeground: "#171323",
   header: "#11121a",
   danger: "#ee8292",
 };
 
 const LIGHT = {
-  background: "#f7f5f0",
-  surface: "#fffdf9",
-  surfaceRaised: "#f1ede6",
-  border: "#ded8ce",
+  background: "#ffffff",
+  surface: "#ffffff",
+  surfaceRaised: "#f4f0ff",
+  border: "#e5ddf6",
   text: "#292638",
   muted: "#706d78",
-  accent: "#438bb9",
-  accentStrong: "#70b5df",
-  header: "#fffdf8",
+  accent: "#a98cff",
+  accentStrong: "#c5b4ff",
+  buttonForeground: "#ffffff",
+  header: "#ffffff",
   danger: "#bd4258",
 };
 
@@ -493,7 +494,14 @@ function PlayTriangle({ color }) {
 
 // Botão principal: o ícone troca entre play e pause com um zoom curto e a forma
 // do botão passa de círculo para um quadrado arredondado.
-function PlayPauseButton({ accessibilityLabel, disabled, isPlaying, onPress, styles }) {
+function PlayPauseButton({
+  accessibilityLabel,
+  buttonForeground,
+  disabled,
+  isPlaying,
+  onPress,
+  styles,
+}) {
   const scale = useSharedValue(1);
   const playing = useSharedValue(isPlaying ? 1 : 0);
 
@@ -532,7 +540,7 @@ function PlayPauseButton({ accessibilityLabel, disabled, isPlaying, onPress, sty
         {/* Só um ícone existe por vez, centralizado pelo próprio botão. A
             troca é um "zoom" curto; o key faz o ícone novo entrar animado. */}
         {disabled ? (
-          <CenteredIcon color={PLAY_ICON_COLOR} name="play" size={32} />
+          <CenteredIcon color={buttonForeground} name="play" size={32} />
         ) : isPlaying ? (
           <Animated.View key="pause" entering={ZoomIn.duration(180)} style={styles.pauseBars}>
             <View style={styles.pauseBar} />
@@ -540,7 +548,7 @@ function PlayPauseButton({ accessibilityLabel, disabled, isPlaying, onPress, sty
           </Animated.View>
         ) : (
           <Animated.View key="play" entering={ZoomIn.duration(180)}>
-            <PlayTriangle color={PLAY_ICON_COLOR} />
+            <PlayTriangle color={buttonForeground} />
           </Animated.View>
         )}
       </AnimatedPressable>
@@ -635,7 +643,7 @@ function createStyles(colors) {
       gap: 8,
       flex: 1,
     },
-    primaryButtonText: { color: "#171323", fontSize: 14, fontWeight: "700" },
+    primaryButtonText: { color: colors.buttonForeground, fontSize: 14, fontWeight: "700" },
     iconButton: {
       width: 40,
       height: 40,
@@ -801,7 +809,7 @@ function createStyles(colors) {
       width: 7,
       height: 24,
       borderRadius: 3,
-      backgroundColor: PLAY_ICON_COLOR,
+      backgroundColor: colors.buttonForeground,
     },
     disabledPlayButton: { opacity: 0.55 },
     progressRow: {
@@ -895,7 +903,7 @@ function createStyles(colors) {
     },
     modalActionPrimary: { backgroundColor: colors.accent },
     modalActionText: { color: colors.text, fontSize: 14, fontWeight: "700" },
-    modalActionPrimaryText: { color: "#171323" },
+    modalActionPrimaryText: { color: colors.buttonForeground },
   });
 }
 
@@ -960,7 +968,7 @@ const PlaylistItem = React.memo(function PlaylistItem({
           style={styles.primaryButton}
         >
           <Text style={styles.primaryButtonText}>Abrir playlist</Text>
-          <Ionicons name="arrow-forward" size={17} color="#171323" />
+          <Ionicons name="arrow-forward" size={17} color={colors.buttonForeground} />
         </AnimatedPressable>
       ) : (
         <View style={styles.cardActions}>
@@ -972,7 +980,7 @@ const PlaylistItem = React.memo(function PlaylistItem({
             style={styles.primaryButton}
           >
             <Text style={styles.primaryButtonText}>Abrir playlist</Text>
-            <Ionicons name="arrow-forward" size={17} color="#171323" />
+            <Ionicons name="arrow-forward" size={17} color={colors.buttonForeground} />
           </AnimatedPressable>
           <Pressable
             accessibilityLabel={`Renomear ${playlist.name}`}
@@ -1078,7 +1086,7 @@ const SongItem = React.memo(function SongItem({
           <Ionicons
             name={isCurrent && isPlaying ? "pause" : "play"}
             size={17}
-            color="#171323"
+            color={colors.buttonForeground}
           />
           <Text style={styles.primaryButtonText}>
             {isCurrent && isPlaying ? "Pausar" : "Reproduzir"}
@@ -2226,6 +2234,7 @@ export default function App() {
             </PlayerControlButton>
             <PlayPauseButton
               accessibilityLabel={playback.isPlaying ? "Pausar música" : "Reproduzir música"}
+              buttonForeground={colors.buttonForeground}
               disabled={!currentSong}
               isPlaying={playback.isPlaying}
               onPress={togglePlayback}
