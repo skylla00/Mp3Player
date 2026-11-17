@@ -535,7 +535,10 @@ function PlayPauseButton({
 
   useEffect(() => {
     playing.set(
-      withSpring(isPlaying ? 1 : 0, { damping: 13, stiffness: 190, mass: 0.8 }),
+      withTiming(isPlaying ? 1 : 0, {
+        duration: 160,
+        easing: Easing.out(Easing.quad),
+      }),
     );
   }, [isPlaying, playing]);
 
@@ -549,10 +552,10 @@ function PlayPauseButton({
     transform: [{ scale: scale.get() }],
   }));
   const handlePressIn = useCallback(() => {
-    scale.set(withSpring(0.9, { damping: 18, stiffness: 380 }));
+    scale.set(withTiming(0.96, { duration: 80 }));
   }, [scale]);
   const handlePressOut = useCallback(() => {
-    scale.set(withSpring(1, { damping: 8, stiffness: 240 }));
+    scale.set(withTiming(1, { duration: 120, easing: Easing.out(Easing.quad) }));
   }, [scale]);
 
   return (
@@ -873,8 +876,6 @@ function createStyles(colors) {
       width: PROGRESS_THUMB_SIZE,
       height: PROGRESS_THUMB_SIZE,
       borderRadius: PROGRESS_THUMB_SIZE / 2,
-      borderWidth: 2,
-      borderColor: colors.surface,
       backgroundColor: colors.accent,
     },
     timeText: {
@@ -1354,9 +1355,12 @@ const ProgressSlider = React.memo(function ProgressSlider({
       { translateX: (animatedProgress.get() - 1) * sliderWidth.get() },
     ],
   }));
-  // A bolinha cresce com um quique enquanto o dedo está na barra.
+  // A bolinha cresce discretamente enquanto o dedo está na barra.
   const thumbScale = useDerivedValue(() =>
-    withSpring(isDragging.get() ? 1.4 : 1, { damping: 13, stiffness: 280 }),
+    withTiming(isDragging.get() ? 1.12 : 1, {
+      duration: 100,
+      easing: Easing.out(Easing.quad),
+    }),
   );
   const thumbStyle = useAnimatedStyle(() => ({
     transform: [
