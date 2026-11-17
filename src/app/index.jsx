@@ -65,6 +65,34 @@ const MARQUEE_FADE_STEPS = 8;
 
 const STORAGE_KEY = "player-de-musica-native";
 
+function getRandomQueueSong(queue, history, currentSongId) {
+  if (queue.length < 2) return null;
+
+  const recentLimit = Math.max(1, Math.floor(queue.length * 0.3));
+  const queueIds = new Set(queue.map((song) => song.id));
+  const recentlyPlayedIds = new Set();
+  for (
+    let index = history.length - 1;
+    index >= 0 && recentlyPlayedIds.size < recentLimit;
+    index -= 1
+  ) {
+    if (queueIds.has(history[index])) {
+      recentlyPlayedIds.add(history[index]);
+    }
+  }
+
+  let candidates = queue.filter(
+    (song) =>
+      song.id !== currentSongId && !recentlyPlayedIds.has(song.id),
+  );
+  if (!candidates.length) {
+    candidates = queue.filter((song) => song.id !== currentSongId);
+  }
+  if (!candidates.length) return null;
+
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
 const DEFAULT_SETTINGS = {
   autoAdvance: true,
   shuffle: false,
@@ -1691,7 +1719,10 @@ export default function App() {
           const history = playbackHistoryRef.current;
           if (history[history.length - 1] !== song.id) {
             history.push(song.id);
-            if (history.length > 100) history.shift();
+            const historyLimit = Math.max(100, currentQueueRef.current.length);
+            if (history.length > historyLimit) {
+              history.splice(0, history.length - historyLimit);
+            }
           }
         }
         let player = soundRef.current;
@@ -1741,10 +1772,13 @@ export default function App() {
       (song) => song.id === finishedSongId,
     );
     if (queue.length > 1) {
-      const nextIndex = currentSettings.shuffle
-        ? Math.floor(Math.random() * queue.length)
-        : (Math.max(currentIndex, 0) + 1) % queue.length;
-      const nextSong = queue[nextIndex];
+      const nextSong = currentSettings.shuffle
+        ? getRandomQueueSong(
+            queue,
+            playbackHistoryRef.current,
+            finishedSongId,
+          )
+        : queue[(Math.max(currentIndex, 0) + 1) % queue.length];
       if (nextSong && nextSong.id !== finishedSongId) {
         playSong(nextSong);
       }
@@ -1785,9 +1819,13 @@ export default function App() {
         }
       }
       if (settingsRef.current.shuffle && queue.length > 1 && direction > 0) {
-        do {
-          nextIndex = Math.floor(Math.random() * queue.length);
-        } while (nextIndex === index);
+        const nextSong = getRandomQueueSong(
+          queue,
+          playbackHistoryRef.current,
+          currentSong?.id,
+        );
+        if (nextSong) await playSong(nextSong);
+        return;
       } else {
         nextIndex = (Math.max(index, 0) + direction + queue.length) % queue.length;
       }
