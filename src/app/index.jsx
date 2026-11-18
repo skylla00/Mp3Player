@@ -1,6 +1,16 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Alert,
+  BackHandler,
+  FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -27,6 +37,8 @@ import Animated, {
   cancelAnimation,
   Easing,
   Extrapolation,
+  FadeIn,
+  FadeOut,
   interpolate,
   useAnimatedStyle,
   ZoomIn,
@@ -647,17 +659,6 @@ function createStyles(colors) {
       borderWidth: 1,
       borderColor: colors.border,
     },
-    artworkLarge: {
-      width: 80,
-      height: 80,
-      borderRadius: 40,
-      backgroundColor: colors.accent,
-      alignSelf: "center",
-      alignItems: "center",
-      justifyContent: "center",
-      marginTop: 2,
-      marginBottom: 3,
-    },
     cardText: { flex: 1, gap: 5 },
     cardTitle: { color: colors.text, fontSize: 16, fontWeight: "700" },
     cardDescription: { color: colors.muted, fontSize: 13, lineHeight: 18 },
@@ -697,49 +698,6 @@ function createStyles(colors) {
       backgroundColor: colors.surface,
     },
     addCardText: { color: colors.text, fontWeight: "700", fontSize: 15 },
-    songCard: { minHeight: 134 },
-    currentSongCard: { borderColor: colors.accent },
-    songHeader: { flexDirection: "row", gap: 12, alignItems: "center" },
-    songMain: {
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 12,
-      flex: 1,
-    },
-    songArtwork: {
-      width: 54,
-      height: 54,
-      borderRadius: 27,
-      backgroundColor: colors.surfaceRaised,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-    songName: { color: colors.text, fontSize: 15, fontWeight: "700" },
-    songSubtext: { color: colors.muted, fontSize: 12, marginTop: 4 },
-    emptyState: {
-      borderWidth: 1,
-      borderColor: colors.border,
-      borderRadius: 18,
-      padding: 24,
-      gap: 10,
-      alignItems: "center",
-      backgroundColor: colors.surface,
-    },
-    emptyTitle: { color: colors.text, fontSize: 16, fontWeight: "700" },
-    emptyText: {
-      color: colors.muted,
-      fontSize: 13,
-      lineHeight: 19,
-      textAlign: "center",
-    },
-    backButton: {
-      alignSelf: "flex-start",
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 7,
-      paddingVertical: 5,
-    },
-    backText: { color: colors.accentStrong, fontWeight: "600", fontSize: 14 },
     status: {
       color: colors.muted,
       fontSize: 13,
@@ -748,6 +706,7 @@ function createStyles(colors) {
       marginHorizontal: 20,
       marginBottom: 8,
     },
+    hidden: { display: "none" },
     playerBar: {
       borderTopWidth: 1,
       borderTopColor: colors.border,
@@ -1050,17 +1009,190 @@ const PlaylistItem = React.memo(function PlaylistItem({
   );
 });
 
-const SongItem = React.memo(function SongItem({
+// Altura fixa dos cartões: permite o getItemLayout e uma rolagem fluida.
+const ROW_HEIGHT = 64;
+const ROW_GAP = 8;
+const ITEM_LENGTH = ROW_HEIGHT + ROW_GAP;
+
+// Menu flutuante dos 3 pontinhos.
+const MENU_WIDTH = 184;
+const MENU_ITEM_HEIGHT = 48;
+const MENU_PADDING = 6;
+const MENU_HEIGHT = MENU_ITEM_HEIGHT * 2 + MENU_PADDING * 2;
+
+// Deixa o texto em minúsculas, sem acentos nem pontuação, para a busca
+// ignorar maiúsculas, acentos e símbolos ("Coração" encontra "coracao").
+function normalizeSearchText(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\.mp3$/i, "")
+    .replace(/[\s_\-.,;:!?'"()[\]{}\\/|&+*#@~`^=<>%$]+/g, " ")
+    .trim();
+}
+
+function createSongsViewStyles(colors) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.background },
+    top: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 10, gap: 18 },
+    backButton: {
+      alignSelf: "flex-start",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+      paddingVertical: 5,
+    },
+    backText: { color: colors.accentStrong, fontWeight: "600", fontSize: 14 },
+    pressed: { opacity: 0.6 },
+    topText: { gap: 6 },
+    title: { color: colors.text, fontSize: 25, fontWeight: "700" },
+    subtitle: { color: colors.muted, fontSize: 14, lineHeight: 20 },
+    searchBar: {
+      height: 46,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceRaised,
+      paddingHorizontal: 14,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    searchBarFocused: { borderColor: colors.accent },
+    searchInput: {
+      flex: 1,
+      padding: 0,
+      color: colors.text,
+      fontSize: 15,
+      includeFontPadding: false,
+    },
+    list: { flex: 1 },
+    listContent: { paddingHorizontal: 20, paddingTop: 6, paddingBottom: 24 },
+    row: {
+      height: ROW_HEIGHT,
+      marginBottom: ROW_GAP,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingLeft: 12,
+      paddingRight: 4,
+      flexDirection: "row",
+      alignItems: "center",
+    },
+    rowCurrent: { borderColor: colors.accent },
+    rowMain: {
+      flex: 1,
+      alignSelf: "stretch",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+    },
+    rowArtwork: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      backgroundColor: colors.surfaceRaised,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    rowText: { flex: 1, minWidth: 0, gap: 2 },
+    rowTitle: { color: colors.text, fontSize: 15, fontWeight: "700" },
+    rowDuration: {
+      color: colors.muted,
+      fontSize: 11,
+      fontVariant: ["tabular-nums"],
+    },
+    dotsButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    dotsButtonPressed: { backgroundColor: colors.surfaceRaised },
+    addCard: {
+      height: ROW_HEIGHT,
+      borderRadius: 16,
+      borderWidth: 1.5,
+      borderStyle: "dashed",
+      borderColor: colors.accent,
+      backgroundColor: colors.surface,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 10,
+    },
+    addCardText: { color: colors.text, fontWeight: "700", fontSize: 15 },
+    emptyState: {
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 18,
+      padding: 24,
+      gap: 10,
+      alignItems: "center",
+      backgroundColor: colors.surface,
+      marginBottom: ROW_GAP,
+    },
+    emptyIcon: {
+      width: 72,
+      height: 72,
+      borderRadius: 36,
+      backgroundColor: colors.accent,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 2,
+    },
+    emptyIconSoft: { backgroundColor: colors.surfaceRaised },
+    emptyTitle: { color: colors.text, fontSize: 16, fontWeight: "700" },
+    emptyText: {
+      color: colors.muted,
+      fontSize: 13,
+      lineHeight: 19,
+      textAlign: "center",
+    },
+    menuLayer: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: "rgba(0,0,0,0.2)",
+    },
+    menuCard: {
+      position: "absolute",
+      width: MENU_WIDTH,
+      padding: MENU_PADDING,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceRaised,
+      elevation: 10,
+      shadowColor: "#000",
+      shadowOpacity: 0.25,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 6 },
+    },
+    menuItem: {
+      height: MENU_ITEM_HEIGHT,
+      borderRadius: 11,
+      paddingHorizontal: 12,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+    },
+    menuItemPressed: { backgroundColor: colors.border },
+    menuLabel: { fontSize: 15, fontWeight: "600" },
+  });
+}
+
+const SongRow = React.memo(function SongRow({
   song,
   isCurrent,
   isPlaying,
   colors,
   styles,
-  onPlaySong,
-  onTogglePlayback,
-  onRenameSong,
-  onRemoveSong,
+  onPress,
+  onOpenMenu,
 }) {
+  const dotsRef = useRef(null);
   const pressScale = useSharedValue(1);
   const pressStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pressScale.value }],
@@ -1069,81 +1201,424 @@ const SongItem = React.memo(function SongItem({
     pressScale.set(withTiming(0.985, { duration: 70 }));
   }, [pressScale]);
   const pressOut = useCallback(() => {
-    pressScale.set(withSpring(1, {
-      damping: 18,
-      stiffness: 420,
-      mass: 0.65,
-      overshootClamping: true,
-    }));
+    pressScale.set(
+      withSpring(1, {
+        damping: 18,
+        stiffness: 420,
+        mass: 0.65,
+        overshootClamping: true,
+      }),
+    );
   }, [pressScale]);
 
+  const title = song.displayName || song.name;
+  const duration =
+    song.durationMillis > 0 ? formatTime(song.durationMillis) : "--:--";
+
   return (
-    <Animated.View
-      style={[
-        styles.card,
-        styles.songCard,
-        isCurrent && styles.currentSongCard,
-        pressStyle,
-      ]}
-    >
-      <View style={styles.songHeader}>
-        <AnimatedPressable
-          onPress={() => onPlaySong(song)}
-          onPressIn={pressIn}
-          onPressOut={pressOut}
-          style={styles.songMain}
-        >
-          <View style={styles.songArtwork}>
-            <Ionicons
-              name={isCurrent && isPlaying ? "volume-high" : "musical-note"}
-              size={23}
-              color={colors.accent}
-            />
-          </View>
-          <View style={styles.cardText}>
-            <Text numberOfLines={2} style={styles.songName}>
-              {song.displayName || song.name}
-            </Text>
-            <Text numberOfLines={1} style={styles.songSubtext}>
-              {isCurrent && isPlaying ? "Tocando agora" : "Arquivo MP3"}
-            </Text>
-          </View>
-        </AnimatedPressable>
-        <Pressable
-          accessibilityLabel={`Renomear ${song.displayName || song.name}`}
-          onPress={() => onRenameSong(song)}
-          hitSlop={6}
-          style={styles.iconButton}
-        >
-          <Ionicons name="pencil-outline" size={17} color={colors.muted} />
-        </Pressable>
-        <Pressable
-          accessibilityLabel={`Remover ${song.displayName || song.name}`}
-          onPress={() => onRemoveSong(song)}
-          hitSlop={6}
-          style={styles.iconButton}
-        >
-          <Ionicons name="trash-outline" size={17} color={colors.danger} />
-        </Pressable>
-      </View>
-      <View style={styles.cardActions}>
-        <Pressable
-          onPress={() => (isCurrent ? onTogglePlayback() : onPlaySong(song))}
-          style={styles.primaryButton}
-        >
+    <Animated.View style={[styles.row, isCurrent && styles.rowCurrent, pressStyle]}>
+      <AnimatedPressable
+        accessibilityRole="button"
+        accessibilityLabel={`${title}, ${duration}`}
+        accessibilityState={{ selected: isCurrent }}
+        onPress={() => onPress(song)}
+        onPressIn={pressIn}
+        onPressOut={pressOut}
+        style={styles.rowMain}
+      >
+        <View style={styles.rowArtwork}>
           <Ionicons
-            name={isCurrent && isPlaying ? "pause" : "play"}
-            size={17}
-            color={colors.buttonForeground}
+            name={isCurrent && isPlaying ? "volume-high" : "musical-note"}
+            size={21}
+            color={colors.accent}
           />
-          <Text style={styles.primaryButtonText}>
-            {isCurrent && isPlaying ? "Pausar" : "Reproduzir"}
+        </View>
+        <View style={styles.rowText}>
+          <Text
+            maxFontSizeMultiplier={1.2}
+            numberOfLines={1}
+            style={styles.rowTitle}
+          >
+            {title}
           </Text>
-        </Pressable>
-      </View>
+          <Text
+            maxFontSizeMultiplier={1.2}
+            numberOfLines={1}
+            style={styles.rowDuration}
+          >
+            {duration}
+          </Text>
+        </View>
+      </AnimatedPressable>
+      <Pressable
+        ref={dotsRef}
+        collapsable={false}
+        accessibilityRole="button"
+        accessibilityLabel={`Mais opções de ${title}`}
+        hitSlop={4}
+        onPress={() => onOpenMenu(song, dotsRef)}
+        style={({ pressed }) => [
+          styles.dotsButton,
+          pressed && styles.dotsButtonPressed,
+        ]}
+      >
+        <Ionicons name="ellipsis-vertical" size={20} color={colors.muted} />
+      </Pressable>
     </Animated.View>
   );
 });
+
+function MenuItem({ icon, label, color, styles, onPress }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.menuItem, pressed && styles.menuItemPressed]}
+    >
+      <Ionicons name={icon} size={19} color={color} />
+      <Text style={[styles.menuLabel, { color }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+// Menu flutuante ao lado do botão de 3 pontinhos. Abre para baixo e, se não
+// houver espaço, para cima.
+function SongMenu({ anchor, colors, styles, onClose, onRename, onDelete }) {
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    progress.set(
+      withTiming(1, { duration: 150, easing: Easing.out(Easing.cubic) }),
+    );
+  }, [progress]);
+  const cardStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [{ scale: 0.9 + progress.value * 0.1 }],
+  }));
+
+  const placeAbove =
+    anchor.bottom + MENU_HEIGHT + 12 > anchor.containerHeight &&
+    anchor.top - MENU_HEIGHT > 8;
+  const top = placeAbove ? anchor.top - MENU_HEIGHT + 4 : anchor.bottom - 4;
+
+  return (
+    <Animated.View
+      entering={FadeIn.duration(120)}
+      exiting={FadeOut.duration(90)}
+      style={styles.menuLayer}
+    >
+      <Pressable
+        accessibilityLabel="Fechar menu"
+        onPress={onClose}
+        style={StyleSheet.absoluteFill}
+      />
+      <Animated.View
+        style={[
+          styles.menuCard,
+          {
+            top,
+            right: anchor.right,
+            transformOrigin: placeAbove ? "right bottom" : "right top",
+          },
+          cardStyle,
+        ]}
+      >
+        <MenuItem
+          icon="pencil-outline"
+          label="Renomear"
+          color={colors.text}
+          styles={styles}
+          onPress={onRename}
+        />
+        <MenuItem
+          icon="trash-outline"
+          label="Deletar"
+          color={colors.danger}
+          styles={styles}
+          onPress={onDelete}
+        />
+      </Animated.View>
+    </Animated.View>
+  );
+}
+
+const songKeyExtractor = (item) => String(item.id);
+const songItemLayout = (_, index) => ({
+  length: ITEM_LENGTH,
+  offset: ITEM_LENGTH * index,
+  index,
+});
+
+function PlaylistSongsView({
+  title,
+  songs,
+  currentSongId,
+  isPlaying,
+  colors,
+  onBack,
+  onImportSongs,
+  onPlaySong,
+  onTogglePlayback,
+  onRenameSong,
+  onRemoveSong,
+  onTypingChange,
+}) {
+  const styles = useMemo(() => createSongsViewStyles(colors), [colors]);
+  const rootRef = useRef(null);
+  const [query, setQuery] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [menu, setMenu] = useState(null);
+
+  // ---- Busca por palavras-chave -------------------------------------------
+  // Cada palavra digitada precisa aparecer em qualquer lugar do nome, em
+  // qualquer ordem. Ex.: "amor noite" encontra "Noite de Amor".
+  const deferredQuery = useDeferredValue(query);
+  const searchIndex = useMemo(
+    () =>
+      songs.map((song) => {
+        const shown = normalizeSearchText(song.displayName || song.name);
+        const original = normalizeSearchText(song.name);
+        return original && original !== shown ? `${shown} ${original}` : shown;
+      }),
+    [songs],
+  );
+  const tokens = useMemo(
+    () => normalizeSearchText(deferredQuery).split(" ").filter(Boolean),
+    [deferredQuery],
+  );
+  const isSearching = tokens.length > 0;
+  const filteredSongs = useMemo(() => {
+    if (!isSearching) return songs;
+    return songs.filter((_, index) =>
+      tokens.every((token) => searchIndex[index].includes(token)),
+    );
+  }, [isSearching, songs, searchIndex, tokens]);
+
+  // ---- Botão voltar do Android --------------------------------------------
+  // Com o menu aberto, fecha o menu; senão volta para a lista de playlists
+  // (em vez de sair do app). Só existe enquanto esta tela está aberta.
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (menu) {
+        setMenu(null);
+      } else {
+        onBack();
+      }
+      return true;
+    });
+    return () => subscription.remove();
+  }, [menu, onBack]);
+
+  // ---- Teclado -------------------------------------------------------------
+  // Avisa o app quando o usuário está digitando na busca, para ele esconder o
+  // player e dar espaço à lista.
+  useEffect(() => {
+    const show = Keyboard.addListener("keyboardDidShow", () =>
+      setKeyboardVisible(true),
+    );
+    const hide = Keyboard.addListener("keyboardDidHide", () =>
+      setKeyboardVisible(false),
+    );
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+  const isTyping = searchFocused && keyboardVisible;
+  useEffect(() => {
+    onTypingChange?.(isTyping);
+    return () => onTypingChange?.(false);
+  }, [isTyping, onTypingChange]);
+
+  // ---- Tocar música --------------------------------------------------------
+  const latestRef = useRef({ currentSongId, onPlaySong, onTogglePlayback });
+  useEffect(() => {
+    latestRef.current = { currentSongId, onPlaySong, onTogglePlayback };
+  });
+  const handlePressSong = useCallback((song) => {
+    const latest = latestRef.current;
+    if (song.id === latest.currentSongId) latest.onTogglePlayback();
+    else latest.onPlaySong(song);
+  }, []);
+
+  // ---- Menu dos 3 pontinhos ------------------------------------------------
+  const openMenu = useCallback((song, anchorRef) => {
+    const root = rootRef.current;
+    const anchor = anchorRef.current;
+    if (!root || !anchor) return;
+    Keyboard.dismiss();
+    root.measureInWindow((rootX, rootY, rootWidth, rootHeight) => {
+      anchor.measureInWindow((x, y, width, height) => {
+        setMenu({
+          song,
+          top: y - rootY,
+          bottom: y - rootY + height,
+          right: Math.max(8, rootX + rootWidth - (x + width)),
+          containerHeight: rootHeight,
+        });
+      });
+    });
+  }, []);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const renameFromMenu = useCallback(() => {
+    const song = menu?.song;
+    setMenu(null);
+    if (song) onRenameSong(song);
+  }, [menu, onRenameSong]);
+  const deleteFromMenu = useCallback(() => {
+    const song = menu?.song;
+    setMenu(null);
+    if (song) onRemoveSong(song);
+  }, [menu, onRemoveSong]);
+
+  // ---- Lista ---------------------------------------------------------------
+  const renderItem = useCallback(
+    ({ item }) => {
+      const isCurrent = item.id === currentSongId;
+      return (
+        <SongRow
+          song={item}
+          isCurrent={isCurrent}
+          isPlaying={isCurrent && isPlaying}
+          colors={colors}
+          styles={styles}
+          onPress={handlePressSong}
+          onOpenMenu={openMenu}
+        />
+      );
+    },
+    [colors, currentSongId, handlePressSong, isPlaying, openMenu, styles],
+  );
+
+  const listEmpty = useMemo(() => {
+    if (songs.length === 0) {
+      return (
+        <View style={styles.emptyState}>
+          <View style={styles.emptyIcon}>
+            <Ionicons name="musical-notes" size={34} color="#fff" />
+          </View>
+          <Text style={styles.emptyTitle}>Sua playlist está vazia</Text>
+          <Text style={styles.emptyText}>
+            Adicione arquivos MP3 para começar a ouvir suas músicas aqui.
+          </Text>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.emptyState}>
+        <View style={[styles.emptyIcon, styles.emptyIconSoft]}>
+          <Ionicons name="search" size={30} color={colors.accent} />
+        </View>
+        <Text style={styles.emptyTitle}>Nada encontrado</Text>
+        <Text style={styles.emptyText}>
+          Nenhuma música combina com essa busca. Tente outras palavras.
+        </Text>
+      </View>
+    );
+  }, [colors.accent, songs.length, styles]);
+
+  const listFooter = useMemo(
+    () =>
+      isSearching ? null : (
+        <Pressable
+          accessibilityRole="button"
+          onPress={onImportSongs}
+          style={styles.addCard}
+        >
+          <Ionicons name="add-circle" size={26} color={colors.accent} />
+          <Text style={styles.addCardText}>Adicionar músicas MP3</Text>
+        </Pressable>
+      ),
+    [colors.accent, isSearching, onImportSongs, styles],
+  );
+
+  const countText = isSearching
+    ? `${filteredSongs.length} ${filteredSongs.length === 1 ? "resultado" : "resultados"}`
+    : `${songs.length} ${songs.length === 1 ? "música" : "músicas"}`;
+
+  return (
+    <View ref={rootRef} collapsable={false} style={styles.root}>
+      <View style={styles.top}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onBack}
+          hitSlop={8}
+          style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+        >
+          <Ionicons name="arrow-back" size={18} color={colors.accentStrong} />
+          <Text style={styles.backText}>Voltar às playlists</Text>
+        </Pressable>
+        <View style={styles.topText}>
+          <Text numberOfLines={1} style={styles.title}>
+            {title}
+          </Text>
+          <Text style={styles.subtitle}>{countText}</Text>
+        </View>
+
+        {songs.length > 0 && (
+          <View style={[styles.searchBar, searchFocused && styles.searchBarFocused]}>
+            <Ionicons name="search" size={18} color={colors.muted} />
+            <TextInput
+              accessibilityLabel="Buscar músicas nesta playlist"
+              autoCapitalize="none"
+              autoCorrect={false}
+              onBlur={() => setSearchFocused(false)}
+              onChangeText={setQuery}
+              onFocus={() => setSearchFocused(true)}
+              placeholder="Buscar nesta playlist"
+              placeholderTextColor={colors.muted}
+              returnKeyType="search"
+              selectionColor={colors.accent}
+              style={styles.searchInput}
+              value={query}
+            />
+            {query.length > 0 && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Limpar busca"
+                hitSlop={10}
+                onPress={() => setQuery("")}
+              >
+                <Ionicons name="close-circle" size={18} color={colors.muted} />
+              </Pressable>
+            )}
+          </View>
+        )}
+      </View>
+
+      <FlatList
+        style={styles.list}
+        data={filteredSongs}
+        renderItem={renderItem}
+        keyExtractor={songKeyExtractor}
+        getItemLayout={songItemLayout}
+        ListEmptyComponent={listEmpty}
+        ListFooterComponent={listFooter}
+        contentContainerStyle={styles.listContent}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        showsVerticalScrollIndicator={false}
+        initialNumToRender={12}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        removeClippedSubviews={Platform.OS === "android"}
+        overScrollMode={Platform.OS === "android" ? "always" : "never"}
+        decelerationRate={Platform.OS === "android" ? 0.985 : "normal"}
+      />
+
+      {menu && (
+        <SongMenu
+          anchor={menu}
+          colors={colors}
+          styles={styles}
+          onClose={closeMenu}
+          onRename={renameFromMenu}
+          onDelete={deleteFromMenu}
+        />
+      )}
+    </View>
+  );
+}
 
 const PlaylistLibrary = React.memo(function PlaylistLibrary({
   activePlaylistId,
@@ -1165,6 +1640,7 @@ const PlaylistLibrary = React.memo(function PlaylistLibrary({
   onRemoveSong,
   onRenamePlaylist,
   onRemovePlaylist,
+  onSearchTypingChange,
 }) {
   const playlistItems = useMemo(
     () => [...BUILT_IN_PLAYLISTS, ...playlists],
@@ -1174,55 +1650,31 @@ const PlaylistLibrary = React.memo(function PlaylistLibrary({
     () => new Set(songs.map((song) => String(song.id))),
     [songs],
   );
-  const listData = activePlaylistId ? playlistSongs : playlistItems;
 
   const renderItem = useCallback(
     ({ item }) => {
-      if (!activePlaylistId) {
-        const songCount =
-          item.id === "all" || item.id === "recent"
-            ? songs.length
-            : (item.songIds || []).filter((id) => songIds.has(String(id))).length;
-
-        return (
-          <PlaylistItem
-            playlist={item}
-            songCount={songCount}
-            colors={colors}
-            styles={styles}
-            onOpenPlaylist={onOpenPlaylist}
-            onRenamePlaylist={onRenamePlaylist}
-            onRemovePlaylist={onRemovePlaylist}
-          />
-        );
-      }
+      const songCount =
+        item.id === "all" || item.id === "recent"
+          ? songs.length
+          : (item.songIds || []).filter((id) => songIds.has(String(id))).length;
 
       return (
-        <SongItem
-          song={item}
-          isCurrent={currentSongId === item.id}
-          isPlaying={isPlaying}
+        <PlaylistItem
+          playlist={item}
+          songCount={songCount}
           colors={colors}
           styles={styles}
-          onPlaySong={onPlaySong}
-          onTogglePlayback={onTogglePlayback}
-          onRenameSong={onRenameSong}
-          onRemoveSong={onRemoveSong}
+          onOpenPlaylist={onOpenPlaylist}
+          onRenamePlaylist={onRenamePlaylist}
+          onRemovePlaylist={onRemovePlaylist}
         />
       );
     },
     [
-      activePlaylistId,
       colors,
-      currentSongId,
-      isPlaying,
       onOpenPlaylist,
-      onPlaySong,
       onRemovePlaylist,
-      onRemoveSong,
       onRenamePlaylist,
-      onRenameSong,
-      onTogglePlayback,
       songIds,
       songs.length,
       styles,
@@ -1230,84 +1682,59 @@ const PlaylistLibrary = React.memo(function PlaylistLibrary({
   );
 
   const listHeader = useMemo(
-    () =>
-      activePlaylistId ? (
-        <>
-          <Pressable onPress={onBack} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={18} color={colors.accentStrong} />
-            <Text style={styles.backText}>Voltar às playlists</Text>
-          </Pressable>
-          <View style={styles.intro}>
-            <Text style={styles.heading}>
-              {customPlaylist?.name ||
-                BUILT_IN_PLAYLISTS.find(
-                  (playlist) => playlist.id === activePlaylistId,
-                )?.name ||
-                "Suas músicas"}
-            </Text>
-            <Text style={styles.subtitle}>
-              {playlistSongs.length}{" "}
-              {playlistSongs.length === 1 ? "música" : "músicas"}
-            </Text>
-          </View>
-        </>
-      ) : (
-        <View style={styles.intro}>
-          <Text style={styles.heading}>Suas playlists</Text>
-          <Text style={styles.subtitle}>
-            Escolha uma playlist para começar a ouvir.
-          </Text>
-        </View>
-      ),
-    [
-      activePlaylistId,
-      colors.accentStrong,
-      customPlaylist,
-      onBack,
-      playlistSongs.length,
-      styles,
-    ],
+    () => (
+      <View style={styles.intro}>
+        <Text style={styles.heading}>Suas playlists</Text>
+        <Text style={styles.subtitle}>
+          Escolha uma playlist para começar a ouvir.
+        </Text>
+      </View>
+    ),
+    [styles],
   );
   const listFooter = useMemo(
     () => (
-      <Pressable
-        onPress={activePlaylistId ? onImportSongs : onCreatePlaylist}
-        style={styles.addCard}
-      >
+      <Pressable onPress={onCreatePlaylist} style={styles.addCard}>
         <Ionicons name="add-circle" size={26} color={colors.accent} />
-        <Text style={styles.addCardText}>
-          {activePlaylistId ? "Adicionar músicas MP3" : "Nova playlist"}
-        </Text>
+        <Text style={styles.addCardText}>Nova playlist</Text>
       </Pressable>
     ),
-    [activePlaylistId, colors.accent, onCreatePlaylist, onImportSongs, styles],
+    [colors.accent, onCreatePlaylist, styles],
   );
-  const listEmpty = useMemo(
-    () =>
-      activePlaylistId ? (
-        <View style={styles.emptyState}>
-          <View style={styles.artworkLarge}>
-            <Ionicons name="musical-notes" size={34} color="#fff" />
-          </View>
-          <Text style={styles.emptyTitle}>Sua playlist está vazia</Text>
-          <Text style={styles.emptyText}>
-            Adicione arquivos MP3 para começar a ouvir suas músicas aqui.
-          </Text>
-        </View>
-      ) : null,
-    [activePlaylistId, styles],
-  );
+
+  // Dentro de uma playlist: tela própria com voltar, busca e lista de músicas.
+  if (activePlaylistId) {
+    return (
+      <PlaylistSongsView
+        title={
+          customPlaylist?.name ||
+          BUILT_IN_PLAYLISTS.find((playlist) => playlist.id === activePlaylistId)
+            ?.name ||
+          "Suas músicas"
+        }
+        songs={playlistSongs}
+        currentSongId={currentSongId}
+        isPlaying={isPlaying}
+        colors={colors}
+        onBack={onBack}
+        onImportSongs={onImportSongs}
+        onPlaySong={onPlaySong}
+        onTogglePlayback={onTogglePlayback}
+        onRenameSong={onRenameSong}
+        onRemoveSong={onRemoveSong}
+        onTypingChange={onSearchTypingChange}
+      />
+    );
+  }
 
   return (
     <Animated.FlatList
-      key={activePlaylistId ? "songs" : "playlists"}
       style={styles.screen}
-      data={listData}
+      data={playlistItems}
       renderItem={renderItem}
       keyExtractor={(item) => String(item.id)}
       ListHeaderComponent={listHeader}
       ListFooterComponent={listFooter}
-      ListEmptyComponent={listEmpty}
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
       initialNumToRender={6}
@@ -1533,6 +1960,8 @@ export default function App() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [nameDialog, setNameDialog] = useState(null);
   const [nameInput, setNameInput] = useState("");
+  // true enquanto o teclado da busca de músicas está aberto (esconde o player).
+  const [searchTyping, setSearchTyping] = useState(false);
   const [status, setStatus] = useState("");
   const [finishedPlayback, setFinishedPlayback] = useState(null);
   const volumeRef = useRef(1);
@@ -1572,9 +2001,20 @@ export default function App() {
     [customPlaylist, songs],
   );
 
+  const deviceSongDurations = useMemo(
+    () =>
+      new Map(
+        deviceMp3s.songs
+          .filter((song) => song.durationMillis > 0)
+          .map((song) => [String(song.id), song.durationMillis]),
+      ),
+    [deviceMp3s.songs],
+  );
+
   const playlistSongs = useMemo(() => {
+    let visibleSongs;
     if (activePlaylistId === "recent") {
-      return [...songs].sort(
+      visibleSongs = [...songs].sort(
         (a, b) =>
           b.addedAt - a.addedAt ||
           (a.displayName || a.name).localeCompare(
@@ -1582,20 +2022,27 @@ export default function App() {
             "pt-BR",
           ),
       );
-    }
-    if (customPlaylist) {
+    } else if (customPlaylist) {
       const songsById = new Map(songs.map((song) => [String(song.id), song]));
-      return (customPlaylist.songIds || [])
+      visibleSongs = (customPlaylist.songIds || [])
         .map((id) => songsById.get(String(id)))
         .filter(Boolean);
+    } else {
+      visibleSongs = [...songs].sort((a, b) =>
+        (a.displayName || a.name).localeCompare(
+          b.displayName || b.name,
+          "pt-BR",
+        ),
+      );
     }
-    return [...songs].sort((a, b) =>
-      (a.displayName || a.name).localeCompare(
-        b.displayName || b.name,
-        "pt-BR",
-      ),
-    );
-  }, [activePlaylistId, customPlaylist, songs]);
+
+    return visibleSongs.map((song) => {
+      const durationMillis = deviceSongDurations.get(String(song.id));
+      return song.durationMillis > 0 || !durationMillis
+        ? song
+        : { ...song, durationMillis };
+    });
+  }, [activePlaylistId, customPlaylist, deviceSongDurations, songs]);
 
   useEffect(() => {
     currentQueueRef.current = playlistSongs;
@@ -2065,6 +2512,7 @@ export default function App() {
             name: song.name,
             displayName: song.displayName,
             uri: song.uri,
+            durationMillis: song.durationMillis || 0,
             addedAt: now,
           }));
         return fresh.length ? [...previous, ...fresh] : previous;
@@ -2267,11 +2715,12 @@ export default function App() {
           onRemoveSong={removeSong}
           onRenamePlaylist={onRenamePlaylist}
           onRemovePlaylist={removePlaylist}
+          onSearchTypingChange={setSearchTyping}
         />
 
         {!!status && <Text accessibilityRole="alert" style={styles.status}>{status}</Text>}
 
-        <View style={styles.playerBar}>
+        <View style={[styles.playerBar, searchTyping && styles.hidden]}>
           <View style={styles.playerTrack}>
             <PlayerArtwork colors={colors} styles={styles} />
             <View style={styles.playerInfo}>
