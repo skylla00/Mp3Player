@@ -7,6 +7,6 @@ yarn-debug.log*
 yarn-error.log*
 
 # Pastas nativas (geradas pelo prebuild)
-android/
-ios/
+/android/
+/ios/
 EOF

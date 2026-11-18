@@ -10,8 +10,8 @@ web-build/
 expo-env.d.ts
 
 # Generated native folders
-ios/
-android/
+/ios/
+/android/
 
 # Native and signing artifacts
 .kotlin/

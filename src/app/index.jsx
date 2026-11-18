@@ -1346,6 +1346,8 @@ const ProgressSlider = React.memo(function ProgressSlider({
   const didCommit = useSharedValue(false);
   // Últimos valores vindos do player, lidos pelos callbacks que rodam no JS.
   const latestRef = useRef({ progress, durationMillis });
+  const latestProgress = useSharedValue(progress);
+  const latestDuration = useSharedValue(durationMillis);
   const canSeek = durationMillis > 0;
 
   const fillStyle = useAnimatedStyle(() => ({
@@ -1373,17 +1375,11 @@ const ProgressSlider = React.memo(function ProgressSlider({
   }));
 
   const commitSeek = useCallback(
-    (ratio) => {
-      onSeek(ratio, latestRef.current.durationMillis);
+    (ratio, total) => {
+      onSeek(ratio, total);
     },
     [onSeek],
   );
-
-  // Volta a barra para a posição real da música (toque cancelado pelo sistema).
-  const syncToPlayback = useCallback(() => {
-    if (didCommit.get()) return;
-    animatedProgress.set(Math.min(Math.max(latestRef.current.progress, 0), 1));
-  }, [animatedProgress, didCommit]);
 
   const gesture = useMemo(() => {
     const moveTo = (x) => {
@@ -1397,7 +1393,11 @@ const ProgressSlider = React.memo(function ProgressSlider({
       "worklet";
       if (didCommit.get()) return;
       didCommit.set(true);
-      scheduleOnRN(commitSeek, animatedProgress.get());
+      scheduleOnRN(
+        commitSeek,
+        animatedProgress.get(),
+        latestDuration.get(),
+      );
     };
 
     const pan = Gesture.Pan()
@@ -1416,7 +1416,11 @@ const ProgressSlider = React.memo(function ProgressSlider({
       })
       .onFinalize(() => {
         isDragging.set(false);
-        if (!didCommit.get()) scheduleOnRN(syncToPlayback);
+        if (!didCommit.get()) {
+          animatedProgress.set(
+            Math.min(Math.max(latestProgress.get(), 0), 1),
+          );
+        }
       });
 
     // Toque simples em qualquer ponto da barra pula para aquele ponto.
@@ -1435,13 +1439,16 @@ const ProgressSlider = React.memo(function ProgressSlider({
     commitSeek,
     didCommit,
     isDragging,
+    latestDuration,
+    latestProgress,
     sliderWidth,
-    syncToPlayback,
   ]);
 
   useEffect(() => {
     latestRef.current = { progress, durationMillis };
-  }, [progress, durationMillis]);
+    latestProgress.set(progress);
+    latestDuration.set(durationMillis);
+  }, [durationMillis, latestDuration, latestProgress, progress]);
 
   // Ações dos leitores de tela (TalkBack): avançar ou voltar um passo fixo.
   const adjustBy = useCallback(
