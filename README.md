@@ -74,14 +74,52 @@ A aplicação foi construída com foco em uma proposta prática: disponibilizar 
 ```text
 src/
 ├── app/
-│   ├── _layout.tsx       # Layout raiz da aplicação
-│   └── index.jsx         # Biblioteca, playlists, reprodução e configurações
-├── components/           # Componentes visuais reutilizáveis do template
-├── constants/            # Constantes de tema
-└── hooks/                # Hooks de interface e tema
+│   ├── _layout.tsx
+│   └── index.tsx                    # Composição da tela e coordenação do app
+├── components/
+│   ├── song-picker-sheet.tsx        # Modal e gestos do seletor de músicas
+│   └── song-picker/
+│       ├── SheetContent.tsx
+│       ├── PickerRow.tsx
+│       ├── StateMessage.tsx
+│       └── styles.ts
+├── features/
+│   ├── app/
+│   │   ├── AppHeader.tsx
+│   │   └── StatusBanner.tsx
+│   ├── library/
+│   │   ├── PlaylistLibrary.tsx      # Composição da biblioteca
+│   │   ├── styles.ts
+│   │   ├── usePlaylistData.ts
+│   │   ├── usePlaylistActions.ts
+│   │   ├── useSongLibraryActions.ts
+│   │   └── components/
+│   │       ├── PlaylistCard.tsx
+│   │       ├── PlaylistSongsView.tsx
+│   │       ├── SongRow.tsx
+│   │       └── SongMenu.tsx
+│   ├── music/
+│   │   ├── constants.ts             # Preferências, temas e medidas do player
+│   │   ├── types.ts                 # Modelos da biblioteca e reprodução
+│   │   └── utils.ts                 # Normalização, formatação e fila aleatória
+│   ├── player/
+│   │   ├── PlayerBar.tsx
+│   │   ├── styles.ts
+│   │   └── components/
+│   │       ├── PlayerControls.tsx
+│   │       ├── PlayerTitle.tsx
+│   │       └── ProgressSlider.tsx
+│   └── settings/
+│       └── components/
+│           ├── SettingsDialog.tsx
+│           └── NameDialog.tsx
+├── hooks/
+│   └── use-device-mp3s.ts           # Varredura de MP3 no Android
+└── modules/
+    └── device-music.ts              # Acesso tipado ao módulo nativo Android
 ```
 
-A maior parte da lógica funcional está concentrada na tela principal, que coordena o estado da biblioteca, as operações de arquivos, a persistência, as playlists e o player de áudio.
+A tela principal coordena o estado e conecta as features de biblioteca, player, configurações e seleção de arquivos. Cada feature mantém componentes e ações relacionados juntos; tipos compartilhados ficam em `features/music/types.ts`, e regras de normalização e formatação em `features/music/utils.ts`. O código da aplicação está em TypeScript, sem alterações nas dependências.
 
 ## Executando localmente
 

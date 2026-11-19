@@ -4,6 +4,7 @@ import { getMusicAssetIds } from "@/modules/device-music";
 // Na SDK 57 a API baseada em funções (getAssetsAsync etc.) fica em "/legacy".
 // É ela que devolve o `uri` de cada arquivo já na listagem, sem uma chamada extra por faixa.
 import * as MediaLibrary from "expo-media-library/legacy";
+import type { DeviceScanOptions, DeviceScanState, DeviceSong } from "@/features/music/types";
 
 // A varredura só existe no Android. No iOS a biblioteca de mídia não expõe
 // arquivos MP3 soltos, e na web não há acesso ao armazenamento.
@@ -15,9 +16,9 @@ const PAGE_SIZE = 500;
 const MIN_DURATION_SECONDS = 30;
 const MP3_FILE = /\.mp3$/i;
 // Só precisamos ler áudio (Android 13+ pede permissão por tipo de mídia).
-const AUDIO_PERMISSION = ["audio"];
+const AUDIO_PERMISSION: MediaLibrary.GranularPermission[] = ["audio"];
 
-function toSong(asset) {
+function toSong(asset: MediaLibrary.Asset): DeviceSong {
   const name = asset.filename;
   return {
     id: `device-${asset.id}`,
@@ -29,7 +30,7 @@ function toSong(asset) {
   };
 }
 
-function compareByName(a, b) {
+function compareByName(a: DeviceSong, b: DeviceSong): number {
   return a.displayName.localeCompare(b.displayName, "pt-BR");
 }
 
@@ -40,14 +41,14 @@ function compareByName(a, b) {
  * status: "idle" | "loading" | "ready" | "denied" | "error"
  */
 export function useDeviceMp3s() {
-  const [state, setState] = useState({
+  const [state, setState] = useState<DeviceScanState>({
     status: "idle",
     songs: [],
     canAskAgain: true,
     error: null,
   });
   const mountedRef = useRef(true);
-  const inFlightRef = useRef(null);
+  const inFlightRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -56,7 +57,7 @@ export function useDeviceMp3s() {
     };
   }, []);
 
-  const scan = useCallback(async ({ requestPermission = false } = {}) => {
+  const scan = useCallback(async ({ requestPermission = false }: DeviceScanOptions = {}) => {
     if (!DEVICE_SCAN_SUPPORTED) return;
 
     // Já existe uma varredura em andamento: se ela era silenciosa e agora o
@@ -66,7 +67,7 @@ export function useDeviceMp3s() {
       if (!requestPermission) return;
     }
 
-    const update = (patch) => {
+    const update = (patch: Partial<DeviceScanState>) => {
       if (mountedRef.current) setState((previous) => ({ ...previous, ...patch }));
     };
 
@@ -102,7 +103,7 @@ export function useDeviceMp3s() {
           : previous,
       );
 
-      const found = [];
+      const found: DeviceSong[] = [];
       const musicAssetIds = new Set(await getMusicAssetIds());
       let after;
       let hasNextPage = true;
