@@ -636,9 +636,6 @@ function createStyles(colors) {
       backgroundColor: "transparent",
     },
     content: { padding: 20, paddingBottom: 28, gap: 18 },
-    intro: { gap: 6, marginBottom: 2 },
-    heading: { color: colors.text, fontSize: 25, fontWeight: "700" },
-    subtitle: { color: colors.muted, fontSize: 14, lineHeight: 20 },
     card: {
       backgroundColor: colors.surface,
       borderColor: colors.border,
@@ -700,14 +697,12 @@ function createStyles(colors) {
     addCardText: { color: colors.text, fontWeight: "700", fontSize: 15 },
     status: {
       position: "absolute",
-      left: 16,
-      right: 16,
-      bottom: 228,
+      maxWidth: "90%",
+      alignSelf: "center",
+      bottom: 224,
       zIndex: 10,
       elevation: 8,
-      flexDirection: "row",
       alignItems: "center",
-      gap: 11,
       paddingHorizontal: 15,
       paddingVertical: 13,
       borderRadius: 18,
@@ -719,16 +714,8 @@ function createStyles(colors) {
       shadowOpacity: 0.18,
       shadowRadius: 12,
     },
-    statusIcon: {
-      width: 34,
-      height: 34,
-      borderRadius: 12,
-      backgroundColor: colors.surfaceRaised,
-      alignItems: "center",
-      justifyContent: "center",
-    },
     statusText: {
-      flex: 1,
+      flexShrink: 1,
       color: colors.text,
       fontSize: 13,
       lineHeight: 19,
@@ -1785,17 +1772,6 @@ const PlaylistLibrary = React.memo(function PlaylistLibrary({
     ],
   );
 
-  const listHeader = useMemo(
-    () => (
-      <View style={styles.intro}>
-        <Text style={styles.heading}>Suas playlists</Text>
-        <Text style={styles.subtitle}>
-          Escolha uma playlist para começar a ouvir.
-        </Text>
-      </View>
-    ),
-    [styles],
-  );
   const listFooter = useMemo(
     () => (
       <Pressable onPress={onCreatePlaylist} style={styles.addCard}>
@@ -1831,7 +1807,6 @@ const PlaylistLibrary = React.memo(function PlaylistLibrary({
       data={playlistItems}
       renderItem={renderItem}
       keyExtractor={(item) => String(item.id)}
-      ListHeaderComponent={listHeader}
       ListFooterComponent={listFooter}
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
@@ -2893,9 +2868,6 @@ export default function App() {
             exiting={FadeOut.duration(320)}
             style={[styles.status, searchTyping && styles.statusAtBottom]}
           >
-            <View style={styles.statusIcon}>
-              <Ionicons name="information-circle" size={20} color={colors.accent} />
-            </View>
             <Text style={styles.statusText}>{status}</Text>
           </Animated.View>
         )}
