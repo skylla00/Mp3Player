@@ -1200,7 +1200,7 @@ function createSongsViewStyles(colors) {
     scrollToTopButton: {
       position: "absolute",
       top: 10,
-      right: 16,
+      alignSelf: "center",
       zIndex: 10,
       elevation: 8,
       minHeight: 42,
@@ -1334,8 +1334,7 @@ function MenuItem({ icon, label, color, styles, onPress }) {
   );
 }
 
-// Menu flutuante ao lado do botão de 3 pontinhos. Abre para baixo e, se não
-// houver espaço, para cima.
+// Menu flutuante ao lado do botão de 3 pontinhos, limitado à área visível.
 function SongMenu({ anchor, colors, styles, onClose, onRename, onDelete }) {
   const progress = useSharedValue(0);
   useEffect(() => {
@@ -1348,10 +1347,14 @@ function SongMenu({ anchor, colors, styles, onClose, onRename, onDelete }) {
     transform: [{ scale: 0.9 + progress.value * 0.1 }],
   }));
 
-  const placeAbove =
-    anchor.bottom + MENU_HEIGHT + 12 > anchor.containerHeight &&
-    anchor.top - MENU_HEIGHT > 8;
-  const top = placeAbove ? anchor.top - MENU_HEIGHT + 4 : anchor.bottom - 4;
+  const maxTop = Math.max(8, anchor.containerHeight - MENU_HEIGHT - 8);
+  const top = Math.min(
+    maxTop,
+    Math.max(
+      8,
+      anchor.top + (anchor.height - MENU_HEIGHT) / 2,
+    ),
+  );
 
   return (
     <Animated.View
@@ -1370,7 +1373,7 @@ function SongMenu({ anchor, colors, styles, onClose, onRename, onDelete }) {
           {
             top,
             right: anchor.right,
-            transformOrigin: placeAbove ? "right bottom" : "right top",
+            transformOrigin: "right center",
           },
           cardStyle,
         ]}
@@ -1510,8 +1513,8 @@ function PlaylistSongsView({
         setMenu({
           song,
           top: y - rootY,
-          bottom: y - rootY + height,
-          right: Math.max(8, rootX + rootWidth - (x + width)),
+          height,
+          right: Math.max(8, rootX + rootWidth - x + 8),
           containerHeight: rootHeight,
         });
       });

@@ -3,6 +3,7 @@ import React, {
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -44,6 +45,8 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const ROW_HEIGHT = 66;
 const ROW_GAP = 10;
 const ITEM_LENGTH = ROW_HEIGHT + ROW_GAP;
+const SCROLL_TO_TOP_THRESHOLD = 240;
+const LIST_HEADER_HEIGHT = 58;
 
 function normalizeSearchText(value) {
   return String(value ?? "")
@@ -115,9 +118,6 @@ function createStyles(colors) {
     body: { flex: 1 },
     searchBar: {
       height: 46,
-      marginHorizontal: 16,
-      marginTop: 12,
-      marginBottom: 6,
       borderRadius: 14,
       borderWidth: 1,
       borderColor: colors.border,
@@ -135,7 +135,33 @@ function createStyles(colors) {
       fontSize: 15,
       includeFontPadding: false,
     },
-    listContent: { padding: 16, paddingBottom: 6 },
+    listContent: { padding: 16, paddingTop: 12, paddingBottom: 6 },
+    scrollToTopButton: {
+      position: "absolute",
+      top: 10,
+      alignSelf: "center",
+      zIndex: 10,
+      elevation: 8,
+      minHeight: 42,
+      paddingHorizontal: 14,
+      borderRadius: 21,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceRaised,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 7,
+      shadowColor: "#000",
+      shadowOpacity: 0.18,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 3 },
+    },
+    scrollToTopText: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: "700",
+    },
     noSearchResults: {
       padding: 28,
       alignItems: "center",
@@ -412,8 +438,10 @@ function SheetContent({
 }) {
   const [selected, setSelected] = useState(() => new Set());
   const [query, setQuery] = useState("");
+  const [showScrollToTop, setShowScrollToTop] = useState(false);
   const enabled = useSharedValue(0);
   const deferredQuery = useDeferredValue(query);
+  const listRef = useRef(null);
 
   // Músicas novas primeiro; as que já estão no destino vão para o fim.
   const ordered = useMemo(() => {
@@ -487,8 +515,40 @@ function SheetContent({
   );
 
   const getItemLayout = useCallback(
-    (_, index) => ({ length: ITEM_LENGTH, offset: ITEM_LENGTH * index, index }),
+    (_, index) => ({
+      length: ITEM_LENGTH,
+      offset: LIST_HEADER_HEIGHT + ITEM_LENGTH * index,
+      index,
+    }),
     [],
+  );
+  const searchBar = (
+    <View style={styles.searchBar}>
+      <Ionicons name="search" size={18} color={colors.muted} />
+      <TextInput
+        accessibilityLabel="Buscar músicas para adicionar"
+        autoCapitalize="none"
+        autoCorrect={false}
+        onChangeText={setQuery}
+        onSubmitEditing={Keyboard.dismiss}
+        placeholder="Buscar músicas"
+        placeholderTextColor={colors.muted}
+        returnKeyType="search"
+        selectionColor={colors.accent}
+        style={styles.searchInput}
+        value={query}
+      />
+      {query.length > 0 && (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Limpar busca"
+          hitSlop={10}
+          onPress={() => setQuery("")}
+        >
+          <Ionicons name="close-circle" size={18} color={colors.muted} />
+        </Pressable>
+      )}
+    </View>
   );
 
   const isLoading = scan.status === "idle" || scan.status === "loading";
@@ -553,38 +613,14 @@ function SheetContent({
   } else {
     body = (
       <Animated.View entering={FadeIn.duration(220)} style={styles.body}>
-        <View style={styles.searchBar}>
-          <Ionicons name="search" size={18} color={colors.muted} />
-          <TextInput
-            accessibilityLabel="Buscar músicas para adicionar"
-            autoCapitalize="none"
-            autoCorrect={false}
-            onChangeText={setQuery}
-            onSubmitEditing={Keyboard.dismiss}
-            placeholder="Buscar músicas"
-            placeholderTextColor={colors.muted}
-            returnKeyType="search"
-            selectionColor={colors.accent}
-            style={styles.searchInput}
-            value={query}
-          />
-          {query.length > 0 && (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Limpar busca"
-              hitSlop={10}
-              onPress={() => setQuery("")}
-            >
-              <Ionicons name="close-circle" size={18} color={colors.muted} />
-            </Pressable>
-          )}
-        </View>
         <FlatList
+          ref={listRef}
           data={filteredSongs}
           extraData={selected}
           renderItem={renderItem}
           keyExtractor={(item) => item.id}
           getItemLayout={getItemLayout}
+          ListHeaderComponent={searchBar}
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={
             <View style={styles.noSearchResults}>
@@ -597,11 +633,31 @@ function SheetContent({
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
+          scrollEventThrottle={16}
+          onScroll={(event) => {
+            const shouldShow =
+              event.nativeEvent.contentOffset.y > SCROLL_TO_TOP_THRESHOLD;
+            setShowScrollToTop((previous) =>
+              previous === shouldShow ? previous : shouldShow,
+            );
+          }}
           initialNumToRender={12}
           maxToRenderPerBatch={10}
           windowSize={7}
           removeClippedSubviews={Platform.OS === "android"}
         />
+        {showScrollToTop && (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() =>
+              listRef.current?.scrollToOffset({ offset: 0, animated: true })
+            }
+            style={styles.scrollToTopButton}
+          >
+            <Ionicons name="arrow-up" size={17} color={colors.accent} />
+            <Text style={styles.scrollToTopText}>Voltar ao topo</Text>
+          </Pressable>
+        )}
       </Animated.View>
     );
   }
