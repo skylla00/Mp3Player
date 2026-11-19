@@ -1013,12 +1013,14 @@ const PlaylistItem = React.memo(function PlaylistItem({
 const ROW_HEIGHT = 64;
 const ROW_GAP = 8;
 const ITEM_LENGTH = ROW_HEIGHT + ROW_GAP;
+const LIST_HEADER_HEIGHT = 72;
 
 // Menu flutuante dos 3 pontinhos.
 const MENU_WIDTH = 184;
 const MENU_ITEM_HEIGHT = 48;
 const MENU_PADDING = 6;
 const MENU_HEIGHT = MENU_ITEM_HEIGHT * 2 + MENU_PADDING * 2;
+const SCROLL_TO_TOP_THRESHOLD = 240;
 
 // Deixa o texto em minúsculas, sem acentos nem pontuação, para a busca
 // ignorar maiúsculas, acentos e símbolos ("Coração" encontra "coracao").
@@ -1035,20 +1037,27 @@ function normalizeSearchText(value) {
 function createSongsViewStyles(colors) {
   return StyleSheet.create({
     root: { flex: 1, backgroundColor: colors.background },
-    top: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 10, gap: 18 },
-    backButton: {
-      alignSelf: "flex-start",
+    toolbar: {
+      paddingTop: 14,
+      paddingBottom: 12,
       flexDirection: "row",
       alignItems: "center",
-      gap: 7,
-      paddingVertical: 5,
+      gap: 10,
     },
-    backText: { color: colors.accentStrong, fontWeight: "600", fontSize: 14 },
+    backButton: {
+      width: 46,
+      height: 46,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceRaised,
+      alignItems: "center",
+      justifyContent: "center",
+    },
     pressed: { opacity: 0.6 },
-    topText: { gap: 6 },
-    title: { color: colors.text, fontSize: 25, fontWeight: "700" },
-    subtitle: { color: colors.muted, fontSize: 14, lineHeight: 20 },
     searchBar: {
+      flex: 1,
+      minWidth: 0,
       height: 46,
       borderRadius: 14,
       borderWidth: 1,
@@ -1155,6 +1164,7 @@ function createSongsViewStyles(colors) {
     menuLayer: {
       ...StyleSheet.absoluteFillObject,
       backgroundColor: "rgba(0,0,0,0.2)",
+      zIndex: 20,
     },
     menuCard: {
       position: "absolute",
@@ -1165,10 +1175,37 @@ function createSongsViewStyles(colors) {
       borderColor: colors.border,
       backgroundColor: colors.surfaceRaised,
       elevation: 10,
+      zIndex: 1,
       shadowColor: "#000",
       shadowOpacity: 0.25,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 6 },
+    },
+    scrollToTopButton: {
+      position: "absolute",
+      top: 10,
+      right: 16,
+      zIndex: 10,
+      elevation: 8,
+      minHeight: 42,
+      paddingHorizontal: 14,
+      borderRadius: 21,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceRaised,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 7,
+      shadowColor: "#000",
+      shadowOpacity: 0.18,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 3 },
+    },
+    scrollToTopText: {
+      color: colors.text,
+      fontSize: 13,
+      fontWeight: "700",
     },
     menuItem: {
       height: MENU_ITEM_HEIGHT,
@@ -1344,12 +1381,11 @@ function SongMenu({ anchor, colors, styles, onClose, onRename, onDelete }) {
 const songKeyExtractor = (item) => String(item.id);
 const songItemLayout = (_, index) => ({
   length: ITEM_LENGTH,
-  offset: ITEM_LENGTH * index,
+  offset: LIST_HEADER_HEIGHT + ITEM_LENGTH * index,
   index,
 });
 
 function PlaylistSongsView({
-  title,
   songs,
   currentSongId,
   isPlaying,
@@ -1364,10 +1400,12 @@ function PlaylistSongsView({
 }) {
   const styles = useMemo(() => createSongsViewStyles(colors), [colors]);
   const rootRef = useRef(null);
+  const listRef = useRef(null);
   const [query, setQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [menu, setMenu] = useState(null);
+  const [showScrollToTop, setShowScrollToTop] = useState(false);
 
   // ---- Busca por palavras-chave -------------------------------------------
   // Cada palavra digitada precisa aparecer em qualquer lugar do nome, em
@@ -1443,6 +1481,10 @@ function PlaylistSongsView({
 
   // ---- Menu dos 3 pontinhos ------------------------------------------------
   const openMenu = useCallback((song, anchorRef) => {
+    if (menu?.song.id === song.id) {
+      setMenu(null);
+      return;
+    }
     const root = rootRef.current;
     const anchor = anchorRef.current;
     if (!root || !anchor) return;
@@ -1458,7 +1500,7 @@ function PlaylistSongsView({
         });
       });
     });
-  }, []);
+  }, [menu]);
   const closeMenu = useCallback(() => setMenu(null), []);
   const renameFromMenu = useCallback(() => {
     const song = menu?.song;
@@ -1532,72 +1574,89 @@ function PlaylistSongsView({
     [colors.accent, isSearching, onImportSongs, styles],
   );
 
-  const countText = isSearching
-    ? `${filteredSongs.length} ${filteredSongs.length === 1 ? "resultado" : "resultados"}`
-    : `${songs.length} ${songs.length === 1 ? "música" : "músicas"}`;
+  const listHeader = useMemo(
+    () => (
+      <View style={styles.toolbar}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Voltar às playlists"
+          onPress={onBack}
+          style={({ pressed }) => [
+            styles.backButton,
+            pressed && styles.pressed,
+          ]}
+        >
+          <Ionicons name="arrow-back" size={20} color={colors.accentStrong} />
+        </Pressable>
+        <View
+          style={[
+            styles.searchBar,
+            searchFocused && styles.searchBarFocused,
+          ]}
+        >
+          <Ionicons name="search" size={18} color={colors.muted} />
+          <TextInput
+            accessibilityLabel="Buscar músicas nesta playlist"
+            autoCapitalize="none"
+            autoCorrect={false}
+            onBlur={() => setSearchFocused(false)}
+            onChangeText={setQuery}
+            onFocus={() => setSearchFocused(true)}
+            placeholder="Buscar nesta playlist"
+            placeholderTextColor={colors.muted}
+            returnKeyType="search"
+            selectionColor={colors.accent}
+            style={styles.searchInput}
+            value={query}
+          />
+          {query.length > 0 && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Limpar busca"
+              hitSlop={10}
+              onPress={() => setQuery("")}
+            >
+              <Ionicons name="close-circle" size={18} color={colors.muted} />
+            </Pressable>
+          )}
+        </View>
+      </View>
+    ),
+    [
+      colors.accent,
+      colors.accentStrong,
+      colors.muted,
+      onBack,
+      query,
+      searchFocused,
+      styles,
+    ],
+  );
 
   return (
     <View ref={rootRef} collapsable={false} style={styles.root}>
-      <View style={styles.top}>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onBack}
-          hitSlop={8}
-          style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
-        >
-          <Ionicons name="arrow-back" size={18} color={colors.accentStrong} />
-          <Text style={styles.backText}>Voltar às playlists</Text>
-        </Pressable>
-        <View style={styles.topText}>
-          <Text numberOfLines={1} style={styles.title}>
-            {title}
-          </Text>
-          <Text style={styles.subtitle}>{countText}</Text>
-        </View>
-
-        {songs.length > 0 && (
-          <View style={[styles.searchBar, searchFocused && styles.searchBarFocused]}>
-            <Ionicons name="search" size={18} color={colors.muted} />
-            <TextInput
-              accessibilityLabel="Buscar músicas nesta playlist"
-              autoCapitalize="none"
-              autoCorrect={false}
-              onBlur={() => setSearchFocused(false)}
-              onChangeText={setQuery}
-              onFocus={() => setSearchFocused(true)}
-              placeholder="Buscar nesta playlist"
-              placeholderTextColor={colors.muted}
-              returnKeyType="search"
-              selectionColor={colors.accent}
-              style={styles.searchInput}
-              value={query}
-            />
-            {query.length > 0 && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Limpar busca"
-                hitSlop={10}
-                onPress={() => setQuery("")}
-              >
-                <Ionicons name="close-circle" size={18} color={colors.muted} />
-              </Pressable>
-            )}
-          </View>
-        )}
-      </View>
-
       <FlatList
+        ref={listRef}
         style={styles.list}
         data={filteredSongs}
         renderItem={renderItem}
         keyExtractor={songKeyExtractor}
         getItemLayout={songItemLayout}
+        ListHeaderComponent={listHeader}
         ListEmptyComponent={listEmpty}
         ListFooterComponent={listFooter}
         contentContainerStyle={styles.listContent}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={(event) => {
+          const shouldShow =
+            event.nativeEvent.contentOffset.y > SCROLL_TO_TOP_THRESHOLD;
+          setShowScrollToTop((previous) =>
+            previous === shouldShow ? previous : shouldShow,
+          );
+        }}
         initialNumToRender={12}
         maxToRenderPerBatch={8}
         windowSize={7}
@@ -1605,6 +1664,22 @@ function PlaylistSongsView({
         overScrollMode={Platform.OS === "android" ? "always" : "never"}
         decelerationRate={Platform.OS === "android" ? 0.985 : "normal"}
       />
+
+      {showScrollToTop && (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() =>
+            listRef.current?.scrollToOffset({ offset: 0, animated: true })
+          }
+          style={({ pressed }) => [
+            styles.scrollToTopButton,
+            pressed && styles.pressed,
+          ]}
+        >
+          <Ionicons name="arrow-up" size={17} color={colors.accentStrong} />
+          <Text style={styles.scrollToTopText}>Voltar ao topo</Text>
+        </Pressable>
+      )}
 
       {menu && (
         <SongMenu
@@ -1706,12 +1781,6 @@ const PlaylistLibrary = React.memo(function PlaylistLibrary({
   if (activePlaylistId) {
     return (
       <PlaylistSongsView
-        title={
-          customPlaylist?.name ||
-          BUILT_IN_PLAYLISTS.find((playlist) => playlist.id === activePlaylistId)
-            ?.name ||
-          "Suas músicas"
-        }
         songs={playlistSongs}
         currentSongId={currentSongId}
         isPlaying={isPlaying}
