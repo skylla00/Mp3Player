@@ -1,5 +1,6 @@
 import React, {
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useState,
@@ -7,11 +8,13 @@ import React, {
 import {
   ActivityIndicator,
   FlatList,
+  Keyboard,
   Modal,
   Platform,
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
   useWindowDimensions,
 } from "react-native";
@@ -41,6 +44,16 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 const ROW_HEIGHT = 66;
 const ROW_GAP = 10;
 const ITEM_LENGTH = ROW_HEIGHT + ROW_GAP;
+
+function normalizeSearchText(value) {
+  return String(value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\.mp3$/i, "")
+    .replace(/[\s_\-.,;:!?'"()[\]{}\\/|&+*#@~`^=<>%$]+/g, " ")
+    .trim();
+}
 
 function formatDuration(milliseconds = 0) {
   const totalSeconds = Math.floor(Math.max(milliseconds, 0) / 1000);
@@ -100,7 +113,40 @@ function createStyles(colors) {
     },
     divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.border },
     body: { flex: 1 },
+    searchBar: {
+      height: 46,
+      marginHorizontal: 16,
+      marginTop: 12,
+      marginBottom: 6,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceRaised,
+      paddingHorizontal: 14,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+    },
+    searchInput: {
+      flex: 1,
+      minWidth: 0,
+      padding: 0,
+      color: colors.text,
+      fontSize: 15,
+      includeFontPadding: false,
+    },
     listContent: { padding: 16, paddingBottom: 6 },
+    noSearchResults: {
+      padding: 28,
+      alignItems: "center",
+      gap: 8,
+    },
+    noSearchResultsText: {
+      color: colors.muted,
+      fontSize: 14,
+      lineHeight: 20,
+      textAlign: "center",
+    },
     row: {
       height: ROW_HEIGHT,
       marginBottom: ROW_GAP,
@@ -365,7 +411,9 @@ function SheetContent({
   onOpenSettings,
 }) {
   const [selected, setSelected] = useState(() => new Set());
+  const [query, setQuery] = useState("");
   const enabled = useSharedValue(0);
+  const deferredQuery = useDeferredValue(query);
 
   // Músicas novas primeiro; as que já estão no destino vão para o fim.
   const ordered = useMemo(() => {
@@ -376,6 +424,20 @@ function SheetContent({
     }
     return [...fresh, ...taken];
   }, [scan.songs, addedIds]);
+  const searchTokens = useMemo(
+    () => normalizeSearchText(deferredQuery).split(" ").filter(Boolean),
+    [deferredQuery],
+  );
+  const filteredSongs = useMemo(
+    () =>
+      searchTokens.length
+        ? ordered.filter((song) => {
+            const name = normalizeSearchText(song.displayName || song.name);
+            return searchTokens.every((token) => name.includes(token));
+          })
+        : ordered,
+    [ordered, searchTokens],
+  );
 
   const chosen = useMemo(
     () => ordered.filter((song) => selected.has(song.id)),
@@ -491,13 +553,49 @@ function SheetContent({
   } else {
     body = (
       <Animated.View entering={FadeIn.duration(220)} style={styles.body}>
+        <View style={styles.searchBar}>
+          <Ionicons name="search" size={18} color={colors.muted} />
+          <TextInput
+            accessibilityLabel="Buscar músicas para adicionar"
+            autoCapitalize="none"
+            autoCorrect={false}
+            onChangeText={setQuery}
+            onSubmitEditing={Keyboard.dismiss}
+            placeholder="Buscar músicas"
+            placeholderTextColor={colors.muted}
+            returnKeyType="search"
+            selectionColor={colors.accent}
+            style={styles.searchInput}
+            value={query}
+          />
+          {query.length > 0 && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Limpar busca"
+              hitSlop={10}
+              onPress={() => setQuery("")}
+            >
+              <Ionicons name="close-circle" size={18} color={colors.muted} />
+            </Pressable>
+          )}
+        </View>
         <FlatList
-          data={ordered}
+          data={filteredSongs}
           extraData={selected}
           renderItem={renderItem}
           keyExtractor={(item) => item.id}
           getItemLayout={getItemLayout}
           contentContainerStyle={styles.listContent}
+          ListEmptyComponent={
+            <View style={styles.noSearchResults}>
+              <Ionicons name="search" size={26} color={colors.muted} />
+              <Text style={styles.noSearchResultsText}>
+                Nenhuma música corresponde à busca. Tente outras palavras.
+              </Text>
+            </View>
+          }
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
           initialNumToRender={12}
           maxToRenderPerBatch={10}
