@@ -699,13 +699,42 @@ function createStyles(colors) {
     },
     addCardText: { color: colors.text, fontWeight: "700", fontSize: 15 },
     status: {
-      color: colors.muted,
+      position: "absolute",
+      left: 16,
+      right: 16,
+      bottom: 228,
+      zIndex: 10,
+      elevation: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 11,
+      paddingHorizontal: 15,
+      paddingVertical: 13,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 5 },
+      shadowOpacity: 0.18,
+      shadowRadius: 12,
+    },
+    statusIcon: {
+      width: 34,
+      height: 34,
+      borderRadius: 12,
+      backgroundColor: colors.surfaceRaised,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    statusText: {
+      flex: 1,
+      color: colors.text,
       fontSize: 13,
       lineHeight: 19,
-      textAlign: "center",
-      marginHorizontal: 20,
-      marginBottom: 8,
+      fontWeight: "600",
     },
+    statusAtBottom: { bottom: 16 },
     hidden: { display: "none" },
     playerBar: {
       borderTopWidth: 1,
@@ -2049,6 +2078,12 @@ export default function App() {
   );
   const colors = lightMode ? LIGHT : DARK;
 
+  useEffect(() => {
+    if (!status) return undefined;
+    const timeoutId = setTimeout(() => setStatus(""), 3200);
+    return () => clearTimeout(timeoutId);
+  }, [status]);
+
   const customPlaylist = useMemo(
     () => playlists.find((playlist) => playlist.id === activePlaylistId) || null,
     [playlists, activePlaylistId],
@@ -2787,8 +2822,6 @@ export default function App() {
           onSearchTypingChange={setSearchTyping}
         />
 
-        {!!status && <Text accessibilityRole="alert" style={styles.status}>{status}</Text>}
-
         <View style={[styles.playerBar, searchTyping && styles.hidden]}>
           <View style={styles.playerTrack}>
             <PlayerArtwork colors={colors} styles={styles} />
@@ -2852,6 +2885,20 @@ export default function App() {
             </PlayerControlButton>
           </View>
         </View>
+
+        {!!status && (
+          <Animated.View
+            accessibilityRole="alert"
+            entering={FadeIn.duration(220)}
+            exiting={FadeOut.duration(320)}
+            style={[styles.status, searchTyping && styles.statusAtBottom]}
+          >
+            <View style={styles.statusIcon}>
+              <Ionicons name="information-circle" size={20} color={colors.accent} />
+            </View>
+            <Text style={styles.statusText}>{status}</Text>
+          </Animated.View>
+        )}
       </View>
 
       <SongPickerSheet
